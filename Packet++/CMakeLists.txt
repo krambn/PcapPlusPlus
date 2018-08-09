@@ -1,0 +1,35 @@
+set(CMAKE_CXX_FLAGS "-DLINUX")
+add_library(pcap++Packet SHARED 
+src/ArpLayer.cpp
+src/DhcpLayer.cpp
+src/DnsLayer.cpp
+src/EthLayer.cpp
+src/GreLayer.cpp
+src/HttpLayer.cpp
+src/IPReassembly.cpp
+src/IPv4Layer.cpp
+src/IPv6Extensions.cpp
+src/IPv6Layer.cpp
+src/IcmpLayer.cpp
+src/IgmpLayer.cpp
+src/Layer.cpp
+src/MplsLayer.cpp
+src/NullLoopbackLayer.cpp
+src/PPPoELayer.cpp
+src/Packet.cpp
+src/PacketTrailerLayer.cpp
+src/PacketUtils.cpp
+src/PayloadLayer.cpp
+src/RawPacket.cpp
+src/SSLHandshake.cpp
+src/SSLLayer.cpp
+src/SdpLayer.cpp
+src/SipLayer.cpp
+src/SllLayer.cpp
+src/TcpLayer.cpp
+src/TcpReassembly.cpp
+src/TextBasedProtocol.cpp
+src/UdpLayer.cpp
+src/VlanLayer.cpp
+src/VxlanLayer.cpp
+)
