@@ -1,0 +1,3 @@
+[submodule "3rdParty/dpdk"]
+	path = 3rdParty/dpdk
+	url = https://github.com/DPDK/dpdk
