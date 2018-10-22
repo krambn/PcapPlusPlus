@@ -40,6 +40,7 @@
 #include <DpdkDeviceList.h>
 #include <DpdkDevice.h>
 #include <NetworkUtils.h>
+#include <RawSocketDevice.h>
 #if !defined(WIN32) && !defined(WINx64) && !defined(PCAPPP_MINGW_ENV)  //for using ntohl, ntohs, etc.
 #include <in.h>
 #endif
@@ -81,6 +82,12 @@ using namespace pcpp;
 		printf("%-30s: FAILED. assertion failed: " assertFailedFormat "\n", __FUNCTION__, ## __VA_ARGS__); \
 		command; \
 		return false; \
+	}
+
+#define PCAPP_TRY(exp, assertFailedFormat, ...) \
+	if (!(exp)) \
+	{ \
+		printf("%s, NON-CRITICAL: " assertFailedFormat "\n", __FUNCTION__, ## __VA_ARGS__); \
 	}
 
 bool isUnitTestDebugMode = false;
@@ -560,6 +567,13 @@ bool packetArrivesBlockingModeNoTimeout(RawPacket* pRawPacket, PcapLiveDevice* d
 	return false;
 }
 
+bool packetArrivesBlockingModeNoTimeoutPacketCount(RawPacket* pRawPacket, PcapLiveDevice* dev, void* userCookie)
+{
+	int* packetCount = (int*)userCookie;
+	(*packetCount)++;
+	return false;
+}
+
 bool packetArrivesBlockingModeStartCapture(RawPacket* pRawPacket, PcapLiveDevice* dev, void* userCookie)
 {
 	LoggerPP::getInstance().supressErrors();
@@ -728,6 +742,17 @@ PCAPP_TEST(TestPcapFileReadWrite)
 
     readerDev.close();
     writerDev.close();
+
+    // read all packets in a bulk
+    PcapFileReaderDevice readerDev2(EXAMPLE_PCAP_PATH);
+    PCAPP_ASSERT(readerDev2.open(), "cannot open reader device 2");
+
+    RawPacketVector packetVec;
+    int numOfPacketsRead = readerDev2.getNextPackets(packetVec);
+    PCAPP_ASSERT(numOfPacketsRead == 4631, "Bulk read: num of packets read isn't 4631");
+    PCAPP_ASSERT(packetVec.size() == 4631, "Bulk read: num of packets in vec isn't 4631");
+
+    readerDev2.close();
 
     PCAPP_TEST_PASSED;
 }
@@ -1271,7 +1296,9 @@ PCAPP_TEST(TestPcapLiveDevice)
 PCAPP_TEST(TestPcapLiveDeviceByInvalidIp)
 {
 	PcapLiveDevice* liveDev = NULL;
-	liveDev = PcapLiveDeviceList::getInstance().getPcapLiveDeviceByIp("eth0");	
+	LoggerPP::getInstance().supressErrors();
+	liveDev = PcapLiveDeviceList::getInstance().getPcapLiveDeviceByIp("eth0");
+	LoggerPP::getInstance().enableErrors();
 	PCAPP_ASSERT(liveDev == NULL, "Cannot get live device by invalid Ip");
 
 	PCAPP_TEST_PASSED;
@@ -1380,6 +1407,38 @@ PCAPP_TEST(TestPcapLiveDeviceBlockingMode)
 	PCAPP_TEST_PASSED;
 }
 
+PCAPP_TEST(TestPcapLiveDeviceSpecialCfg)
+{
+	PcapLiveDevice* liveDev = PcapLiveDeviceList::getInstance().getPcapLiveDeviceByIp(args.ipToSendReceivePackets.c_str());
+	PCAPP_ASSERT(liveDev != NULL, "Step 0: Device used in this test %s doesn't exist", args.ipToSendReceivePackets.c_str());
+
+	// open device in default mode
+	PCAPP_ASSERT(liveDev->open(), "Step 0: Cannot open live device");
+
+	// sanity test - make sure packets are captured in default mode
+	int packetCount = 0;
+	PCAPP_ASSERT(liveDev->startCaptureBlockingMode(packetArrivesBlockingModeNoTimeoutPacketCount, &packetCount, 7) == -1, "Step 2: Capture blocking mode didn't return on callback");
+
+	liveDev->close();
+
+	PCAPP_ASSERT(packetCount > 0, "No packets are captured in default configuration mode");
+
+	packetCount = 0;
+
+	// create a non-default configuration with timeout of 10ms and open the device again
+	PcapLiveDevice::DeviceConfiguration devConfig(PcapLiveDevice::Promiscuous, 10, 2000000);
+	liveDev->open(devConfig);
+
+	// start capturing in non-default configuration
+	PCAPP_ASSERT(liveDev->startCaptureBlockingMode(packetArrivesBlockingModeNoTimeoutPacketCount, &packetCount, 7) == -1, "Step 2: Capture blocking mode didn't return on callback");
+
+	liveDev->close();
+
+	PCAPP_ASSERT(packetCount > 0, "No packets are captured in non-default configuration mode");
+
+	PCAPP_TEST_PASSED;
+}
+
 PCAPP_TEST(TestWinPcapLiveDevice)
 {
 #ifdef WIN32
@@ -1446,6 +1505,7 @@ PCAPP_TEST(TestPcapFilters)
 		PCAPP_ASSERT(ipv4Layer->getIPv4Header()->ipDst == ipToSearch.toInt(), "'IP Filter' failed. Packet IP dst is %X, expected %X", ipv4Layer->getIPv4Header()->ipDst, ipToSearch.toInt());
 	}
 
+
     //------------
     //Port filter
     //------------
@@ -1467,6 +1527,7 @@ PCAPP_TEST(TestPcapFilters)
 		PCAPP_ASSERT(ntohs(pTcpLayer->getTcpHeader()->portSrc) == 80, "'Port Filter' failed. Packet port src is %d, expected 80", pTcpLayer->getTcpHeader()->portSrc);
 	}
 	capturedPackets.clear();
+
 
     //----------------
     //IP & Port filter
@@ -1494,6 +1555,7 @@ PCAPP_TEST(TestPcapFilters)
 	}
 	capturedPackets.clear();
 
+
     //-----------------
     //IP || Port filter
     //-----------------
@@ -1517,8 +1579,12 @@ PCAPP_TEST(TestPcapFilters)
 		{
 			TcpLayer* pTcpLayer = packet.getLayerOfType<TcpLayer>();
 			bool srcPortMatch = ntohs(pTcpLayer->getTcpHeader()->portSrc) == 80;
+			bool srcIpMatch = false;
 			IPv4Layer* pIPv4Layer = packet.getLayerOfType<IPv4Layer>();
-			bool srcIpMatch = pIPv4Layer->getIPv4Header()->ipSrc == ipToSearch.toInt();
+			if (pIPv4Layer != NULL)
+			{
+				srcIpMatch = pIPv4Layer->getIPv4Header()->ipSrc == ipToSearch.toInt();
+			}
 			PCAPP_ASSERT(srcIpMatch || srcPortMatch, "'Or Filter' failed. Src port is: %d; Src IP is: %X, Expected: port 80 or IP %s", ntohs(pTcpLayer->getTcpHeader()->portSrc), pIPv4Layer->getIPv4Header()->ipSrc, args.ipToSendReceivePackets.c_str());
 		} else
 		if (packet.isPacketOfType(IP))
@@ -1554,6 +1620,7 @@ PCAPP_TEST(TestPcapFilters)
 	}
 	capturedPackets.clear();
 
+
     //-----------------
     //VLAN filter
     //-----------------
@@ -1583,6 +1650,7 @@ PCAPP_TEST(TestPcapFilters)
 
     capturedPackets.clear();
 
+
     //--------------------
     //MacAddress filter
     //--------------------
@@ -1609,6 +1677,7 @@ PCAPP_TEST(TestPcapFilters)
     }
 
     capturedPackets.clear();
+
 
     //--------------------
     //EtherType filter
@@ -1661,6 +1730,7 @@ PCAPP_TEST(TestPcapFilters)
     }
 
     capturedPackets.clear();
+
 
     //-------------------------
     //IpV4 Total Length filter
@@ -1782,6 +1852,7 @@ PCAPP_TEST(TestPcapFilters)
 
     capturedPackets.clear();
 
+
     //-------------------------
     //IP filter with mask
     //-------------------------
@@ -1829,6 +1900,7 @@ PCAPP_TEST(TestPcapFilters)
     }
     capturedPackets.clear();
 
+
     //-------------
     //Port range
     //-------------
@@ -1863,6 +1935,7 @@ PCAPP_TEST(TestPcapFilters)
     	}
     }
     capturedPackets.clear();
+
 
     liveDev->close();
 	PCAPP_TEST_PASSED;
@@ -2338,12 +2411,11 @@ PCAPP_TEST(TestPfRingDevice)
 	PCAPP_ASSERT(packetData.PacketCount > 0, "No packets were captured");
 	PCAPP_ASSERT(packetData.ThreadId != -1, "Couldn't retrieve thread ID");
 
-	pcap_stat stats;
-	stats.ps_recv = 0;
-	stats.ps_drop = 0;
-	stats.ps_ifdrop = 0;
+	PfRingDevice::PfRingStats stats;
+	stats.recv = 0;
+	stats.drop = 0;
 	dev->getStatistics(stats);
-	PCAPP_ASSERT(stats.ps_recv == (uint32_t)packetData.PacketCount, "Stats received packet count is different than calculated packet count");
+	PCAPP_ASSERT(stats.recv == (uint32_t)packetData.PacketCount, "Stats received packet count is different than calculated packet count");
 	dev->close();
 
 	PCAPP_DEBUG_PRINT("Thread ID: %d", packetData.ThreadId);
@@ -2353,8 +2425,8 @@ PCAPP_TEST(TestPfRingDevice)
 	PCAPP_DEBUG_PRINT("TCP packets: %d", packetData.TcpCount);
 	PCAPP_DEBUG_PRINT("UDP packets: %d", packetData.UdpCount);
 	PCAPP_DEBUG_PRINT("Device statistics:");
-	PCAPP_DEBUG_PRINT("Packets captured: %d", stats.ps_recv);
-	PCAPP_DEBUG_PRINT("Packets dropped: %d", stats.ps_drop);
+	PCAPP_DEBUG_PRINT("Packets captured: %d", stats.recv);
+	PCAPP_DEBUG_PRINT("Packets dropped: %d", stats.drop);
 
 //	test filters
 #endif
@@ -2381,17 +2453,17 @@ PCAPP_TEST(TestPfRingDeviceSingleChannel)
 	dev->stopCapture();
 	PCAPP_ASSERT(packetData.PacketCount > 0, "No packets were captured");
 	PCAPP_ASSERT(packetData.ThreadId != -1, "Couldn't retrieve thread ID");
-	pcap_stat stats;
+	PfRingDevice::PfRingStats stats;
 	dev->getStatistics(stats);
-	PCAPP_ASSERT(stats.ps_recv == (uint32_t)packetData.PacketCount, "Stats received packet count is different than calculated packet count");
+	PCAPP_ASSERT(stats.recv == (uint32_t)packetData.PacketCount, "Stats received packet count is different than calculated packet count");
 	PCAPP_DEBUG_PRINT("Thread ID: %d", packetData.ThreadId);
 	PCAPP_DEBUG_PRINT("Total packets captured: %d", packetData.PacketCount);
 	PCAPP_DEBUG_PRINT("Eth packets: %d", packetData.EthCount);
 	PCAPP_DEBUG_PRINT("IP packets: %d", packetData.IpCount);
 	PCAPP_DEBUG_PRINT("TCP packets: %d", packetData.TcpCount);
 	PCAPP_DEBUG_PRINT("UDP packets: %d", packetData.UdpCount);
-	PCAPP_DEBUG_PRINT("Packets captured: %d", stats.ps_recv);
-	PCAPP_DEBUG_PRINT("Packets dropped: %d", stats.ps_drop);
+	PCAPP_DEBUG_PRINT("Packets captured: %d", stats.recv);
+	PCAPP_DEBUG_PRINT("Packets dropped: %d", stats.drop);
 
 	dev->close();
 	PCAPP_ASSERT(dev->getNumOfOpenedRxChannels() == 0, "There are still open RX channels after device close");
@@ -2433,12 +2505,11 @@ bool TestPfRingDeviceMultiThread(CoreMask coreMask, PcapTestArgs args)
 	PCAPP_ASSERT(dev->startCaptureMultiThread(pfRingPacketsArriveMultiThread, packetDataMultiThread, coreMask), "Couldn't start capturing multi-thread");
 	PCAP_SLEEP(10);
 	dev->stopCapture();
-	pcap_stat aggrStats;
-	aggrStats.ps_recv = 0;
-	aggrStats.ps_drop = 0;
-	aggrStats.ps_ifdrop = 0;
+	PfRingDevice::PfRingStats aggrStats;
+	aggrStats.recv = 0;
+	aggrStats.drop = 0;
 
-	pcap_stat stats;
+	PfRingDevice::PfRingStats stats;
 	for (int i = 0; i < totalnumOfCores; i++)
 	{
 		if ((SystemCores::IdToSystemCore[i].Mask & coreMask) == 0)
@@ -2451,16 +2522,16 @@ bool TestPfRingDeviceMultiThread(CoreMask coreMask, PcapTestArgs args)
 		PCAPP_DEBUG_PRINT("TCP packets: %d", packetDataMultiThread[i].TcpCount);
 		PCAPP_DEBUG_PRINT("UDP packets: %d", packetDataMultiThread[i].UdpCount);
 		dev->getThreadStatistics(SystemCores::IdToSystemCore[i], stats);
-		aggrStats.ps_recv += stats.ps_recv;
-		aggrStats.ps_drop += stats.ps_drop;
-		PCAPP_DEBUG_PRINT("Packets captured: %d", stats.ps_recv);
-		PCAPP_DEBUG_PRINT("Packets dropped: %d", stats.ps_drop);
-		PCAPP_ASSERT(stats.ps_recv == (uint32_t)packetDataMultiThread[i].PacketCount, "Stats received packet count is different than calculated packet count on thread %d", packetDataMultiThread[i].ThreadId);
+		aggrStats.recv += stats.recv;
+		aggrStats.drop += stats.drop;
+		PCAPP_DEBUG_PRINT("Packets captured: %d", stats.recv);
+		PCAPP_DEBUG_PRINT("Packets dropped: %d", stats.drop);
+		PCAPP_ASSERT(stats.recv == (uint32_t)packetDataMultiThread[i].PacketCount, "Stats received packet count is different than calculated packet count on thread %d", packetDataMultiThread[i].ThreadId);
 	}
 
 	dev->getStatistics(stats);
-	PCAPP_ASSERT(aggrStats.ps_recv == stats.ps_recv, "Aggregated stats weren't calculated correctly: aggr recv = %d, calc recv = %d", stats.ps_recv, aggrStats.ps_recv);
-	PCAPP_ASSERT(aggrStats.ps_drop == stats.ps_drop, "Aggregated stats weren't calculated correctly: aggr drop = %d, calc drop = %d", stats.ps_drop, aggrStats.ps_drop);
+	PCAPP_ASSERT(aggrStats.recv == stats.recv, "Aggregated stats weren't calculated correctly: aggr recv = %d, calc recv = %d", stats.recv, aggrStats.recv);
+	PCAPP_ASSERT(aggrStats.drop == stats.drop, "Aggregated stats weren't calculated correctly: aggr drop = %d, calc drop = %d", stats.drop, aggrStats.drop);
 
 	for (int firstCoreId = 0; firstCoreId < totalnumOfCores; firstCoreId++)
 	{
@@ -2669,7 +2740,7 @@ PCAPP_TEST(TestPfRingFilters)
 	PfRingDevice* dev = devList.getPfRingDeviceByName(string(pcapLiveDev->getName()));
 
 	PCAPP_ASSERT(dev->isFilterCurrentlySet() == false, "Device indicating filter is set although we didn't set any filters yet");
-	PCAPP_ASSERT(dev->removeFilter() == true, "RemoveFilter returned false although no filter was set yet");
+	PCAPP_ASSERT(dev->clearFilter() == true, "clearFilter returned false although no filter was set yet");
 	ProtoFilter protocolFilter(TCP);
 	LoggerPP::getInstance().supressErrors();
 	PCAPP_ASSERT(dev->setFilter(protocolFilter) == false, "Succeed setting a filter while device is closed");
@@ -2698,7 +2769,7 @@ PCAPP_TEST(TestPfRingFilters)
 	instruction.Instruction = 1;
 	instruction.Data = "";
 	PCAPP_ASSERT(dev->isFilterCurrentlySet() == true, "Device indicating filter isn't set although we set a filter");
-	PCAPP_ASSERT(dev->removeFilter() == true, "Remove filter failed");
+	PCAPP_ASSERT(dev->clearFilter() == true, "clearfilter failed");
 	PCAPP_ASSERT(dev->isFilterCurrentlySet() == false, "Device indicating filter still exists although we removed it");
 	PCAPP_ASSERT(dev->startCaptureSingleThread(pfRingPacketsArriveSetFilter, &instruction), "Couldn't start capturing");
 	PCAP_SLEEP(10);
@@ -5491,6 +5562,136 @@ PCAPP_TEST(TestIPFragRemove)
 	PCAPP_TEST_PASSED;
 }
 
+PCAPP_TEST(TestRawSockets)
+{
+	IPAddress::Ptr_t ipAddr = IPAddress::fromString(args.ipToSendReceivePackets);
+	PCAPP_ASSERT(ipAddr.get() != NULL && ipAddr.get()->isValid(), "IP address is not valid");
+	RawSocketDevice rawSock(*(ipAddr.get()));
+
+#if defined(WIN32) || defined(WINx64) || defined(PCAPPP_MINGW_ENV)
+	ProtocolType protocol = (ipAddr.get()->getType() == IPAddress::IPv4AddressType ? IPv4 : IPv6);
+	bool sendSupported = false;
+#elif LINUX
+	ProtocolType protocol = Ethernet;
+	bool sendSupported = true;
+#else
+	ProtocolType protocol = Ethernet;
+	bool sendSupported = false;
+	{
+		LoggerPP::getInstance().supressErrors();
+		RawPacket rawPacket;
+		PCAPP_ASSERT(rawSock.open() == false, "Managed to open the raw sorcket on unsupoorted platform");
+		PCAPP_ASSERT(rawSock.receivePacket(rawPacket, true, 10) == RawSocketDevice::RecvError, "Managed to receive a packet on an unsupported platform");
+		PCAPP_ASSERT(rawSock.sendPacket(&rawPacket) == false, "Managed to send a packet on an unsupported platform");
+		LoggerPP::getInstance().enableErrors();
+	}
+
+	PCAPP_TEST_PASSED;
+
+#endif
+
+	PCAPP_ASSERT(rawSock.open() == true, "Couldn't open raw socket");
+
+	// receive single packet
+	for (int i = 0; i < 10; i++)
+	{
+		RawPacket rawPacket;
+		PCAPP_ASSERT(rawSock.receivePacket(rawPacket, true, 10) == RawSocketDevice::RecvSuccess, "Couldn't receive packet on raw socket");
+		Packet parsedPacket(&rawPacket);
+		PCAPP_ASSERT(parsedPacket.isPacketOfType(protocol) == true, "Received packet is not of type 0x%X", protocol);
+	}
+
+	// receive multiple packets
+	RawPacketVector packetVec;
+	int failedRecv = 0;
+	rawSock.receivePackets(packetVec, 20, failedRecv);
+	PCAPP_ASSERT(packetVec.size() > 0, "Didn't receive packets on vec");
+	for (RawPacketVector::VectorIterator iter = packetVec.begin(); iter != packetVec.end(); iter++)
+	{
+		Packet parsedPacket(*iter);
+		PCAPP_ASSERT(parsedPacket.isPacketOfType(protocol) == true, "Received packet is not of type 0x%X", protocol);
+	}
+
+	// receive with timeout
+	RawSocketDevice::RecvPacketResult res = RawSocketDevice::RecvSuccess;
+	for (int i = 0; i < 30; i++)
+	{
+		RawPacket rawPacket;
+		res = rawSock.receivePacket(rawPacket, true, 1);
+		if (res == RawSocketDevice::RecvTimeout)
+			break;
+	}
+	PCAPP_TRY(res == RawSocketDevice::RecvTimeout, "Didn't reach receive timeout");
+
+	// receive non-blocking
+	res = RawSocketDevice::RecvSuccess;
+	for (int i = 0; i < 30; i++)
+	{
+		RawPacket rawPacket;
+		res = rawSock.receivePacket(rawPacket, false, -1);
+		if (res == RawSocketDevice::RecvWouldBlock)
+			break;
+	}
+	PCAPP_TRY(res == RawSocketDevice::RecvWouldBlock, "Didn't get would block response");
+
+	// close and reopen sockets, verify can't send and receive while closed
+	rawSock.close();
+	RawPacket tempPacket;
+	LoggerPP::getInstance().supressErrors();
+	PCAPP_ASSERT(rawSock.receivePacket(tempPacket, true, 10) == RawSocketDevice::RecvError, "Managed to receive packet while device is closed");
+	PCAPP_ASSERT(rawSock.sendPacket(packetVec.at(0)) == false, "Managed to send packet while device is closed");
+	LoggerPP::getInstance().enableErrors();
+
+	PCAPP_ASSERT(rawSock.open() == true, "Couldn't reopen raw socket");
+
+	// open another socket on the same interface
+	RawSocketDevice rawSock2(*(ipAddr.get()));
+	PCAPP_ASSERT(rawSock2.open() == true, "Couldn't open raw socket 2");
+
+	// receive packet on 2 sockets
+	for (int i = 0; i < 5; i++)
+	{
+		RawPacket rawPacket;
+		PCAPP_ASSERT(rawSock.receivePacket(rawPacket, true, 5) == RawSocketDevice::RecvSuccess, "Couldn't receive packet on raw socket 1");
+		Packet parsedPacket(&rawPacket);
+		PCAPP_ASSERT(parsedPacket.isPacketOfType(protocol) == true, "Received packet 1 is not of type 0x%X", protocol);
+		RawPacket rawPacket2;
+		PCAPP_ASSERT(rawSock2.receivePacket(rawPacket2, true, 5) == RawSocketDevice::RecvSuccess, "Couldn't receive packet on raw socket 2");
+		Packet parsedPacket2(&rawPacket2);
+		PCAPP_ASSERT(parsedPacket2.isPacketOfType(protocol) == true, "Received packet 2 is not of type 0x%X", protocol);
+	}
+
+	if (sendSupported)
+	{
+		// send single packet
+		PcapFileReaderDevice readerDev(EXAMPLE2_PCAP_PATH);
+		PCAPP_ASSERT(readerDev.open() == true, "Coudln't open file");
+		packetVec.clear();
+		readerDev.getNextPackets(packetVec, 100);
+		for (RawPacketVector::VectorIterator iter = packetVec.begin(); iter != packetVec.end(); iter++)
+		{
+			PCAPP_ASSERT(rawSock.sendPacket(*iter) == true, "Coudln't send raw packet on raw socket 1");
+			PCAPP_ASSERT(rawSock2.sendPacket(*iter) == true, "Coudln't send raw packet on raw socket 2");
+		}
+
+		// send multiple packets
+		PCAPP_ASSERT(rawSock.sendPackets(packetVec) == 100, "Couldn't send 100 packets in a vec");
+	}
+	else
+	{
+		// test send on unsupported platforms
+		LoggerPP::getInstance().supressErrors();
+		PCAPP_ASSERT(rawSock.sendPacket(packetVec.at(0)) == false, "Sent one packet on unsupported platform");
+		PCAPP_ASSERT(rawSock.sendPackets(packetVec) == false, "Sent packets on unsupported platform");
+		LoggerPP::getInstance().enableErrors();
+	}
+
+	rawSock.close();
+	rawSock2.close();
+
+	PCAPP_TEST_PASSED;
+}
+
 
 static struct option PcapTestOptions[] =
 {
@@ -5601,6 +5802,7 @@ int main(int argc, char* argv[])
 	PCAPP_RUN_TEST(TestPcapLiveDeviceNoNetworking, args, false);
 	PCAPP_RUN_TEST(TestPcapLiveDeviceStatsMode, args, true);
 	PCAPP_RUN_TEST(TestPcapLiveDeviceBlockingMode, args, true);
+	PCAPP_RUN_TEST(TestPcapLiveDeviceSpecialCfg, args, true);
 	PCAPP_RUN_TEST(TestWinPcapLiveDevice, args, true);
 	PCAPP_RUN_TEST(TestPcapLiveDeviceByInvalidIp, args, false);
 	PCAPP_RUN_TEST(TestPcapFilters, args, true);
@@ -5640,6 +5842,7 @@ int main(int argc, char* argv[])
 	PCAPP_RUN_TEST(TestIPFragMultipleFrags, args, false);
 	PCAPP_RUN_TEST(TestIPFragMapOverflow, args, false);
 	PCAPP_RUN_TEST(TestIPFragRemove, args, false);
+	PCAPP_RUN_TEST(TestRawSockets, args, true);
 
 	PCAPP_END_RUNNING_TESTS;
 }

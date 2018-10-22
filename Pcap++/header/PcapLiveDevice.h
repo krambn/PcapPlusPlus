@@ -120,10 +120,12 @@ namespace pcpp
 		std::string printThreadId(PcapThread* id);
 		virtual ThreadStart getCaptureThreadStart();
 	public:
+
 		/**
 		 * The type of the live device
 		 */
-		enum LiveDeviceType {
+		enum LiveDeviceType
+		{
 			/** libPcap live device */
 			LibPcapDevice,
 			/** WinPcap live device */
@@ -132,15 +134,61 @@ namespace pcpp
 			RemoteDevice
 		};
 
+
 		/**
 		 * Device capturing mode
 		 */
-		enum DeviceMode {
+		enum DeviceMode
+		{
 			/** Only packets that their destination is this NIC are captured */
 			Normal = 0,
 			/** All packets that arrive to the NIC are captured, even packets that their destination isn't this NIC */
 			Promiscuous = 1
 		};
+
+
+		/**
+		 * @struct DeviceConfiguration
+		 * A struct that contains user configurable parameters for opening a device. All parameters have default values so
+		 * the user isn't expected to set all parameters or understand exactly how they work
+		 */
+		struct DeviceConfiguration
+		{
+			/** Indicates whether to open the device in promiscuous or normal mode */
+			DeviceMode mode;
+
+			/** Set the packet buffer timeout in milliseconds. You can read more here:
+			 * https://www.tcpdump.org/manpages/pcap.3pcap.html .
+			 * Any value above 0 is considered legal, otherwise a value of 1 or -1 is used (depends on the platform)
+			 */
+			int packetBufferTimeoutMs;
+
+			/**
+			 * Set the packet buffer size. You can read more about the packet buffer here:
+			 * https://www.tcpdump.org/manpages/pcap.3pcap.html .
+			 * Any value of 100 or above is considered valid, otherwise the default value is used (which varies between different OS's).
+			 * However, please notice that setting values which are too low or two high may result in failure to open the device.
+			 * These too low or too high thresholds may vary between OS's, as an example please refer to this thread:
+			 * https://stackoverflow.com/questions/11397367/issue-in-pcap-set-buffer-size
+			 */
+			int packetBufferSize;
+
+			/**
+			 * A c'tor for this struct
+			 * @param[in] mode The mode to open the device: promiscuous or non-promiscuous. Default value is promiscuous
+			 * @param[in] packetBufferTimeoutMs Buffer timeout in millisecond. Default value is 0 which means set timeout of
+			 * 1 or -1 (depends on the platform)
+			 * @param[in] packetBufferSize The packet buffer size. Default value is 0 which means use the default value
+			 * (varies between different OS's)
+			 */
+			DeviceConfiguration(DeviceMode mode = Promiscuous, int packetBufferTimeoutMs = 0, int packetBufferSize = 0)
+			{
+				this->mode = mode;
+				this->packetBufferTimeoutMs = packetBufferTimeoutMs;
+				this->packetBufferSize = packetBufferSize;
+			}
+		};
+
 
 		/**
 		 * A destructor for this class
@@ -375,7 +423,8 @@ namespace pcpp
 		 */
 		virtual int sendPackets(const RawPacketVector& rawPackets);
 
-		//override methods
+
+		// implement abstract methods
 
 		/**
 		 * Open the device using libpcap pcap_open_live. Opening the device only makes the device ready for use, it doesn't start packet capturing.
@@ -386,18 +435,20 @@ namespace pcpp
 		 */
 		bool open();
 
+		/**
+		 * Enables to open a device in a non-default configuration. Configuration has parameters like packet buffer timeout & size, open in
+		 * promiscuous/non-promiscuous mode, etc. Please check DeviceConfiguration for more details
+		 * @param[in] config The requested configuration
+		 * @return Same as open()
+		 */
+		bool open(const DeviceConfiguration& config);
+
 		void close();
 
 		virtual void getStatistics(pcap_stat& stats);
 
-		/**
-		 * Same as open(), but enables to open the device in normal or promiscuous mode
-		 * @param[in] mode Normal or promiscuous mode
-		 * @return Same as open()
-		 */
-		bool open(DeviceMode mode);
 	protected:
-		pcap_t* doOpen(DeviceMode mode);
+		pcap_t* doOpen(const DeviceConfiguration& config);
 	};
 
 } // namespace pcpp
