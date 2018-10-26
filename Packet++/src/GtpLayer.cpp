@@ -68,13 +68,13 @@ std::string GtpLayer::toString()
 	ss << "GTP layer, Version: " << (getGtpHeader()->flags >> 5);
 	ss << ", P: " << (((getGtpHeader()->flags & 0x10) == 0) ? false : true);
 	ss << ", T: " << hasTeid();
-	ss << ", Type: " << (uint8_t)getGtpHeader()->type;
-	ss << ", Length: " << getGtpHeader()->length;
+	ss << ", Type: " << (uint32_t)getGtpHeader()->type;
+	ss << ", Length: " << ntohs(getGtpHeader()->length);
 	if (hasTeid()){
-		ss << ", TEID: " << getGtpteidHeader()->teid;
-		ss << ", Sequence number: " << getGtpteidHeader()->seq;
+		ss << ", TEID: " << ntohl(getGtpteidHeader()->teid);
+		ss << ", Sequence number: " << ntohl(getGtpteidHeader()->seq);
 	}else{
-		ss << ", Sequence number: " << getGtpHeader()->seq;
+		ss << ", Sequence number: " << ntohl(getGtpHeader()->seq);
 	}
 	return ss.str();
 }
