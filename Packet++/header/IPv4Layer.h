@@ -33,7 +33,12 @@ namespace pcpp
 				internetHeaderLength:4;
 #endif
 		/** type of service, same as Differentiated Services Code Point (DSCP)*/
+#if 0
 		uint8_t typeOfService;
+#else
+		uint8_t dscp:6;
+		uint8_t ecn:2;
+#endif
 		/** Entire packet (fragment) size, including header and data, in bytes */
 		uint16_t totalLength;
 		/** Identification field. Primarily used for uniquely identifying the group of fragments of a single IP datagram*/
