@@ -17,7 +17,7 @@ namespace pcpp
 	 * Represents an GTP protocol header
 	 */
 #pragma pack(push,1)
-	struct gtphdr {
+	struct gtpv2hdr {
 		/** 3 bit Version piggybacking flag, TEID flag, Spare */
 		uint8_t flags;
 		/** Message type */
@@ -28,7 +28,7 @@ namespace pcpp
 		uint32_t seq;
 	};
 
-	struct gtphdr_teid {
+	struct gtpv2hdr_teid {
 		/** 3 bit Version piggybacking flag, TEID flag, Spare */
 		uint8_t flags;
 		/** Message type */
@@ -44,20 +44,20 @@ namespace pcpp
 
 
 	/**
-	 * @class GtpLayer
+	 * @class Gtpv2Layer
 	 * Represents an UDP (User Datagram Protocol) protocol layer
 	 */
-	class GtpLayer : public Layer
+	class Gtpv2Layer : public Layer
 	{
 	public:
 		/**
 		 * A constructor that creates the layer from an existing packet raw data
-		 * @param[in] data A pointer to the raw data (will be casted to @ref gtphdr)
+		 * @param[in] data A pointer to the raw data (will be casted to @ref gtpv2hdr)
 		 * @param[in] dataLen Size of the data in bytes
 		 * @param[in] prevLayer A pointer to the previous layer
 		 * @param[in] packet A pointer to the Packet instance where layer will be stored in
 		 */
-		GtpLayer(uint8_t* data, size_t dataLen, Layer* prevLayer, Packet* packet) : Layer(data, dataLen, prevLayer, packet){}
+		Gtpv2Layer(uint8_t* data, size_t dataLen, Layer* prevLayer, Packet* packet) : Layer(data, dataLen, prevLayer, packet){}
 
 		/**
 		 * A constructor that allocates a new UDP header with source and destination ports
@@ -67,14 +67,14 @@ namespace pcpp
 		 * @param[in] teid TEID if T flag is set 
 		 * @param[in] seq Sequence number 
 		 */
-		GtpLayer(uint8_t flags, uint8_t type, uint16_t length, uint32_t teid, uint32_t seq);
+		Gtpv2Layer(uint8_t flags, uint8_t type, uint16_t length, uint32_t teid, uint32_t seq);
 
 		/**
-		 * Get a pointer to the GTP header. Notice this points directly to the data, so every change will change the actual packet data
-		 * @return A pointer to the @ref gtphdr
+		 * Get a pointer to the GTPv2 header. Notice this points directly to the data, so every change will change the actual packet data
+		 * @return A pointer to the @ref gtpv2hdr
 		 */
-		inline gtphdr* getGtpHeader() { return (gtphdr*)m_Data; };
-		inline gtphdr_teid* getGtpteidHeader() { return (gtphdr_teid*)m_Data; };
+		inline gtpv2hdr* getGtpv2Header() { return (gtpv2hdr*)m_Data; };
+		inline gtpv2hdr_teid* getGtpv2teidHeader() { return (gtpv2hdr_teid*)m_Data; };
 
 		bool hasTeid();
 
@@ -87,18 +87,18 @@ namespace pcpp
 		void parseNextLayer();
 
 		/**
-		 * @return Size of @ref gtphdr
+		 * @return Size of @ref gtpv2hdr
 		 */
 		inline size_t getHeaderLen() {
 			if (hasTeid()) {
-				return sizeof(gtphdr_teid);
+				return sizeof(gtpv2hdr_teid);
 			}else{
-				return sizeof(gtphdr);
+				return sizeof(gtpv2hdr);
 			}
 		}
 
 		/**
-		 * Calculate @ref gtphdr#headerChecksum field
+		 * Calculate @ref gtpv2hdr#headerChecksum field
 		 */
 		void computeCalculateFields();
 
@@ -109,4 +109,4 @@ namespace pcpp
 
 } // namespace pcpp
 
-#endif /* PACKETPP_GTP_LAYER */
+#endif /* PACKETPP_GTPV2_LAYER */

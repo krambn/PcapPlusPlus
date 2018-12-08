@@ -9,7 +9,7 @@
 #include "DhcpLayer.h"
 #include "VxlanLayer.h"
 #include "SipLayer.h"
-#include "GtpLayer.h"
+#include "Gtpv2Layer.h"
 #include "Logger.h"
 #include <string.h>
 #include <sstream>
@@ -100,7 +100,7 @@ void UdpLayer::parseNextLayer()
 	else if (((portDst == 5060) || (portDst == 5061) || (portSrc == 5060) || (portSrc == 5061)) && (SipResponseFirstLine::parseStatusCode((char*)(m_Data + sizeof(udphdr)), m_DataLen - sizeof(udphdr)) != SipResponseLayer::SipStatusCodeUnknown))
 		m_NextLayer = new SipResponseLayer(m_Data + sizeof(udphdr), m_DataLen - sizeof(udphdr), this, m_Packet);
 	else if ((portDst == 2123) || (portSrc == 2123))
-		m_NextLayer = new GtpLayer(m_Data + sizeof(udphdr), m_DataLen - sizeof(udphdr), this, m_Packet);
+		m_NextLayer = new Gtpv2Layer(m_Data + sizeof(udphdr), m_DataLen - sizeof(udphdr), this, m_Packet);
 	else
 		m_NextLayer = new PayloadLayer(m_Data + sizeof(udphdr), m_DataLen - sizeof(udphdr), this, m_Packet);
 }

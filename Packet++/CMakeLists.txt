@@ -32,5 +32,5 @@ src/TextBasedProtocol.cpp
 src/UdpLayer.cpp
 src/VlanLayer.cpp
 src/VxlanLayer.cpp
-src/GtpLayer.cpp
+src/Gtpv2Layer.cpp
 )
