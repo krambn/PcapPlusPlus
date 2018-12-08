@@ -26,14 +26,14 @@ namespace pcpp
 		uint8_t internetHeaderLength:4,
 		/** IP version number, has the value of 4 for IPv4 */
 				ipVersion:4;
-    uint8_t ecn:2;
+    uint8_t ecn:2,
 		        dscp:6;
 #else
 		/** IP version number, has the value of 4 for IPv4 */
 		uint8_t ipVersion:4,
 		/** IP header length, has the value of 5 for IPv4 */
 				internetHeaderLength:4;
-    uint8_t dscp:6;
+    uint8_t dscp:6,
 		        ecn:2;
 #endif
 		/** type of service, same as Differentiated Services Code Point (DSCP)*/
