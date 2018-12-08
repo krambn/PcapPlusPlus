@@ -1,5 +1,5 @@
-#ifndef PACKETPP_GTP_LAYER
-#define PACKETPP_GTP_LAYER
+#ifndef PACKETPP_GTPV2_LAYER
+#define PACKETPP_GTPV2_LAYER
 
 #include "Layer.h"
 

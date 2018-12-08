@@ -201,9 +201,14 @@ namespace pcpp
 		PacketTrailer = 0x20000000,
 
 		/**
+		 * GTPv1
+		 */
+		GTPv1 = 0x40000000,
+
+    /**
 		 * GTPv2
 		 */
-		GTPv2 = 0x40000000
+		GTPv2 = 0x80000000
 	};
 
 
