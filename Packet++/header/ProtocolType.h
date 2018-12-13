@@ -206,9 +206,15 @@ namespace pcpp
 		GTPv1 = 0x40000000,
 
     /**
+		 * Stream
+		 */
+		STREAM = 0x80000000,
+
+    /**
 		 * GTPv2
 		 */
-		GTPv2 = 0x80000000
+		GTPv2 = 0x100000000
+
 	};
 
 

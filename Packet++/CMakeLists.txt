@@ -34,4 +34,5 @@ src/VlanLayer.cpp
 src/VxlanLayer.cpp
 src/Gtpv1Layer.cpp
 src/Gtpv2Layer.cpp
+src/StreamLayer.cpp
 )
