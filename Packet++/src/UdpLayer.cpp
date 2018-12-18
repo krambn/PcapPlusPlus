@@ -11,6 +11,7 @@
 #include "SipLayer.h"
 #include "Gtpv1Layer.h"
 #include "Gtpv2Layer.h"
+#include "RadiusLayer.h"
 #include "Logger.h"
 #include <string.h>
 #include <sstream>
@@ -104,6 +105,8 @@ void UdpLayer::parseNextLayer()
 		m_NextLayer = new Gtpv1Layer(m_Data + sizeof(udphdr), m_DataLen - sizeof(udphdr), this, m_Packet);
 	else if ((portDst == 2123) || (portSrc == 2123))
 		m_NextLayer = new Gtpv2Layer(m_Data + sizeof(udphdr), m_DataLen - sizeof(udphdr), this, m_Packet);
+	else if ((portDst == 1812) || (portSrc == 1812))
+		m_NextLayer = new RadiusLayer(m_Data + sizeof(udphdr), m_DataLen - sizeof(udphdr), this, m_Packet);
 	else
 		m_NextLayer = new PayloadLayer(m_Data + sizeof(udphdr), m_DataLen - sizeof(udphdr), this, m_Packet);
 }

@@ -24,6 +24,15 @@
     <ClInclude Include="..\..\Packet++\header\DnsLayer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\Packet++\header\DnsLayerEnums.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Packet++\header\DnsResource.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Packet++\header\DnsResourceData.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\Packet++\header\EthLayer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -78,6 +87,9 @@
     <ClInclude Include="..\..\Packet++\header\ProtocolType.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\Packet++\header\RadiusLayer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\Packet++\header\RawPacket.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -108,6 +120,9 @@
     <ClInclude Include="..\..\Packet++\header\TcpReassembly.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\Packet++\header\TLVData.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\Packet++\header\UdpLayer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -123,6 +138,12 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Packet++\src\DnsLayer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\Packet++\src\DnsResource.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\Packet++\src\DnsResourceData.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Packet++\src\EthLayer.cpp">
@@ -173,6 +194,9 @@
     <ClCompile Include="..\..\Packet++\src\PPPoELayer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\Packet++\src\RadiusLayer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\Packet++\src\RawPacket.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -198,6 +222,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Packet++\src\TcpReassembly.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\Packet++\src\TLVData.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Packet++\src\UdpLayer.cpp">

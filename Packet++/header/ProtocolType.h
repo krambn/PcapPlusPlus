@@ -213,8 +213,12 @@ namespace pcpp
     /**
 		 * GTPv2
 		 */
-		GTPv2 = 0x100000000
+		GTPv2 = 0x100000000,
 
+    /**
+		 * RADIUS protocol
+		 */
+		Radius = 0x200000000
 	};
 
 
