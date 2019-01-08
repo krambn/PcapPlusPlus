@@ -905,6 +905,8 @@ PACKETPP_TEST(Ipv6UdpPacketParseAndCreate)
 	IPv6Address dstIP(string("ff02::c"));
 	PACKETPP_ASSERT(ipv6Layer->getSrcIpAddress() == srcIP, "incorrect source address");
 	PACKETPP_ASSERT(ipv6Layer->getDstIpAddress() == dstIP, "incorrect dest address");
+	PACKETPP_ASSERT(ipv6Layer->getTrafficClass() == 0, "incorrect traffic class");
+	PACKETPP_ASSERT(ipv6Layer->getFlowLabel() == 0, "incorrect flow label");
 	UdpLayer* pUdpLayer = NULL;
 	PACKETPP_ASSERT((pUdpLayer = ip6UdpPacket.getLayerOfType<UdpLayer>()) != NULL, "UDP layer doesn't exist");
 	PACKETPP_ASSERT(pUdpLayer->getUdpHeader()->portDst == htons(1900), "UDP dest port != 1900");
@@ -919,6 +921,75 @@ PACKETPP_TEST(Ipv6UdpPacketParseAndCreate)
 	ip6_hdr* ip6Header = ip6Layer.getIPv6Header();
 	ip6Header->hopLimit = 1;
 	ip6Header->nextHeader = 17;
+	ip6Layer.setIpVersion();
+	ip6Layer.setTrafficClass(0);
+	ip6Layer.setFlowLabel(0);
+
+
+	UdpLayer udpLayer(63628, 1900);
+
+	Layer* afterIpv6Layer = pUdpLayer->getNextLayer();
+	uint8_t* payloadData = new uint8_t[afterIpv6Layer->getDataLen()];
+	afterIpv6Layer->copyData(payloadData);
+	PayloadLayer payloadLayer(payloadData, afterIpv6Layer->getDataLen(), true);
+
+	PACKETPP_ASSERT(ip6UdpPacketNew.addLayer(&ethLayer), "Couldn't add eth layer");
+	PACKETPP_ASSERT(ip6UdpPacketNew.addLayer(&ip6Layer), "Couldn't add IPv6 layer");
+	PACKETPP_ASSERT(ip6UdpPacketNew.addLayer(&udpLayer), "Couldn't add udp layer");
+	PACKETPP_ASSERT(ip6UdpPacketNew.addLayer(&payloadLayer), "Couldn't add payload layer");
+	ip6UdpPacketNew.computeCalculateFields();
+
+	PACKETPP_ASSERT(bufferLength == ip6UdpPacketNew.getRawPacket()->getRawDataLen(), "Generated packet len (%d) is different than read packet len (%d)", ip6UdpPacketNew.getRawPacket()->getRawDataLen(), bufferLength);
+	PACKETPP_ASSERT(memcmp(ip6UdpPacketNew.getRawPacket()->getRawData(), buffer, bufferLength) == 0, "Raw packet data is different than expected");
+
+	delete[] payloadData;
+
+	PACKETPP_TEST_PASSED;
+}
+
+PACKETPP_TEST(Ipv6UdpPacketModifiedParseAndCreate)
+{
+	int bufferLength = 0;
+	uint8_t* buffer = readFileIntoBuffer("PacketExamples/IPv6UdpPacketModified.dat", bufferLength);
+	PACKETPP_ASSERT(!(buffer == NULL), "cannot read file");
+
+	timeval time;
+	gettimeofday(&time, NULL);
+	RawPacket rawPacket((const uint8_t*)buffer, bufferLength, time, true);
+
+	Packet ip6UdpPacket(&rawPacket);
+	PACKETPP_ASSERT(!ip6UdpPacket.isPacketOfType(IPv4), "Packet is of type IPv4 instead IPv6");
+	PACKETPP_ASSERT(!ip6UdpPacket.isPacketOfType(TCP), "Packet is of type TCP where it shouldn't");
+	IPv6Layer* ipv6Layer = NULL;
+	PACKETPP_ASSERT((ipv6Layer = ip6UdpPacket.getLayerOfType<IPv6Layer>()) != NULL, "IPv6 layer doesn't exist");
+	PACKETPP_ASSERT(ipv6Layer->getIPv6Header()->nextHeader == 17, "Protocol read from packet isnt UDP (17). Protocol is: %d", ipv6Layer->getIPv6Header()->nextHeader);
+	PACKETPP_ASSERT(ipv6Layer->getIPv6Header()->ipVersion == 6, "IP version isn't 6. Version is: %d", ipv6Layer->getIPv6Header()->ipVersion);
+	IPv6Address srcIP(string("fe80::4dc7:f593:1f7b:dc11"));
+	IPv6Address dstIP(string("ff02::c"));
+	uint8_t trafficClass = 204;
+	uint32_t flowLabel = 230346;
+	PACKETPP_ASSERT(ipv6Layer->getSrcIpAddress() == srcIP, "incorrect source address");
+	PACKETPP_ASSERT(ipv6Layer->getDstIpAddress() == dstIP, "incorrect dest address");
+	PACKETPP_ASSERT(ipv6Layer->getTrafficClass() == trafficClass, "incorrect traffic class");
+	PACKETPP_ASSERT(ipv6Layer->getFlowLabel() == flowLabel, "incorrect flow label");
+	UdpLayer* pUdpLayer = NULL;
+	PACKETPP_ASSERT((pUdpLayer = ip6UdpPacket.getLayerOfType<UdpLayer>()) != NULL, "UDP layer doesn't exist");
+	PACKETPP_ASSERT(pUdpLayer->getUdpHeader()->portDst == htons(1900), "UDP dest port != 1900");
+	PACKETPP_ASSERT(pUdpLayer->getUdpHeader()->portSrc == htons(63628), "UDP dest port != 63628");
+	PACKETPP_ASSERT(pUdpLayer->getUdpHeader()->length == htons(154), "UDP dest port != 154");
+	PACKETPP_ASSERT(pUdpLayer->getUdpHeader()->headerChecksum == htons(0x5fea), "UDP dest port != 0x5fea");
+
+	Packet ip6UdpPacketNew(1);
+	EthLayer ethLayer(MacAddress("6c:f0:49:b2:de:6e"), MacAddress ("33:33:00:00:00:0c"));
+
+	IPv6Layer ip6Layer(srcIP, dstIP);
+	ip6_hdr* ip6Header = ip6Layer.getIPv6Header();
+	ip6Header->hopLimit = 1;
+	ip6Header->nextHeader = 17;
+	ip6Layer.setIpVersion();
+	ip6Layer.setTrafficClass(trafficClass);
+	ip6Layer.setFlowLabel(flowLabel);
+
 
 	UdpLayer udpLayer(63628, 1900);
 
@@ -7035,6 +7106,7 @@ int main(int argc, char* argv[]) {
 	PACKETPP_RUN_TEST(Ipv4OptionsEditTest);
 	PACKETPP_RUN_TEST(Ipv4UdpChecksum);
 	PACKETPP_RUN_TEST(Ipv6UdpPacketParseAndCreate);
+	PACKETPP_RUN_TEST(Ipv6UdpPacketModifiedParseAndCreate);
 	PACKETPP_RUN_TEST(Ipv6FragmentationTest);
 	PACKETPP_RUN_TEST(Ipv6ExtensionsTest);
 	PACKETPP_RUN_TEST(TcpPacketNoOptionsParsing);
