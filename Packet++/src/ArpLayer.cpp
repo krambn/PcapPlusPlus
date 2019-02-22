@@ -14,7 +14,7 @@
 namespace pcpp
 {
 
-ArpLayer::ArpLayer(ArpOpcode opCode, const MacAddress& senderMacAddr, const MacAddress& targetMacAddr, const IPv4Address senderIpAddr, const IPv4Address& targetIpAddr)
+ArpLayer::ArpLayer(uint16_t opCode, const MacAddress& senderMacAddr, const MacAddress& targetMacAddr, const IPv4Address senderIpAddr, const IPv4Address& targetIpAddr)
 {
 	m_DataLen = sizeof(arphdr);
 	m_Data = new uint8_t[m_DataLen];

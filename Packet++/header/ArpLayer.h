@@ -74,7 +74,7 @@ namespace pcpp
 		 * @param[in] senderIpAddr The sender IP address (will be put in arphdr#senderIpAddr)
 		 * @param[in] targetIpAddr The target IP address (will be put in arphdr#targetIpAddr)
 		 */
-		ArpLayer(ArpOpcode opCode, const MacAddress& senderMacAddr, const MacAddress& targetMacAddr, const IPv4Address senderIpAddr, const IPv4Address& targetIpAddr);
+		ArpLayer(uint16_t opCode, const MacAddress& senderMacAddr, const MacAddress& targetMacAddr, const IPv4Address senderIpAddr, const IPv4Address& targetIpAddr);
 
 		~ArpLayer() {}
 
