@@ -46,6 +46,19 @@ IcmpLayer::IcmpLayer() : Layer()
 	m_Protocol = ICMP;
 }
 
+IcmpLayer::IcmpLayer(uint8_t type, uint8_t code, uint16_t id, uint16_t sequence) : Layer()
+{
+	m_DataLen = sizeof(icmphdr);
+	m_Data = new uint8_t[m_DataLen];
+	memset(m_Data, 0, m_DataLen);
+	m_Protocol = ICMP;
+
+    if (type == 0 || type == 8 || type == 128 || type == 129) {
+        setEchoData(static_cast<IcmpMessageType>(type), id, sequence, 0, NULL, 0);
+    }
+
+}
+
 IcmpMessageType IcmpLayer::getMessageType()
 {
 	uint8_t type = getIcmpHeader()->type;

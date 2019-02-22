@@ -404,7 +404,9 @@ namespace pcpp
 		 */
 		IcmpLayer();
 
-		virtual ~IcmpLayer() {}
+		IcmpLayer(uint8_t type, uint8_t code, uint16_t id, uint16_t sequence);
+        
+        virtual ~IcmpLayer() {}
 
 		/**
 		 * Get a pointer to the basic ICMP header. Notice this points directly to the data, so every change will change the actual packet data
