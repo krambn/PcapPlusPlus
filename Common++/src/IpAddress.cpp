@@ -8,7 +8,7 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #endif
-
+#include <boost/lexical_cast.hpp>
 
 namespace pcpp
 {
@@ -98,8 +98,20 @@ void IPv4Address::init(char* addressAsString)
 	m_pInAddr = new in_addr();
     if (inet_pton(AF_INET, addressAsString , m_pInAddr) == 0)
     {
-    	m_IsValid = false;
-    	return;
+        try {
+            //uint32_t addressAsInt = 
+            //    boost::lexical_cast<unsigned int>(addressAsString);
+            uint32_t addressAsInt = htonl(std::stoul(std::string(addressAsString), 0, 0));
+	        memcpy(m_pInAddr, &addressAsInt, sizeof(addressAsInt));
+	        if (inet_ntop(AF_INET, m_pInAddr, m_AddressAsString, MAX_ADDR_STRING_LEN) == 0)
+		        m_IsValid = false;
+	        else
+		        m_IsValid = true;
+            return;
+        } catch (...) {
+        	m_IsValid = false;
+        	return;
+        }
     }
 
     strncpy(m_AddressAsString, addressAsString, 40);
