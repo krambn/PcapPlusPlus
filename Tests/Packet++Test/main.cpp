@@ -189,6 +189,35 @@ PACKETPP_TEST(EthPacketCreation) {
 	PACKETPP_TEST_PASSED;
 }
 
+PACKETPP_TEST(EthPacketPointerCreation) {
+	MacAddress srcMac("aa:aa:aa:aa:aa:aa");
+	MacAddress dstMac("bb:bb:bb:bb:bb:bb");
+	EthLayer *ethLayer = new EthLayer(srcMac, dstMac, PCPP_ETHERTYPE_IP);
+
+	uint8_t payload[] = { 0x01, 0x02, 0x03, 0x04 };
+	PayloadLayer *payloadLayer = new PayloadLayer(payload, 4, true);
+
+	Packet *ethPacket = new Packet(1);
+	PACKETPP_ASSERT(ethPacket->addLayer(ethLayer, true), "Adding ethernet layer failed");
+	PACKETPP_ASSERT(ethPacket->addLayer(payloadLayer, true), "Adding payload layer failed");
+
+	PACKETPP_ASSERT(ethPacket->isPacketOfType(Ethernet), "Packet is not of type Ethernet");
+	PACKETPP_ASSERT(ethPacket->getLayerOfType<EthLayer>() != NULL, "Ethernet layer doesn't exist");
+	PACKETPP_ASSERT(ethPacket->getLayerOfType<EthLayer>() == ethLayer, "Ethernet layer doesn't equal to inserted layer");
+	PACKETPP_ASSERT(ethPacket->getLayerOfType<EthLayer>()->getDestMac() == dstMac, "Packet dest mac isn't equal to intserted dest mac");
+	PACKETPP_ASSERT(ethPacket->getLayerOfType<EthLayer>()->getSourceMac() == srcMac, "Packet src mac isn't equal to intserted src mac");
+	PACKETPP_ASSERT(ethPacket->getLayerOfType<EthLayer>()->getEthHeader()->etherType == ntohs(PCPP_ETHERTYPE_IP), "Packet ether type isn't equal to PCPP_ETHERTYPE_IP");
+
+	RawPacket* rawPacket = ethPacket->getRawPacket();
+	PACKETPP_ASSERT(rawPacket != NULL, "Raw packet is NULL");
+	PACKETPP_ASSERT(rawPacket->getRawDataLen() == 18, "Raw packet length expected to be 18 but it's %d", rawPacket->getRawDataLen());
+
+	uint8_t expectedBuffer[18] = { 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0x08, 0x00, 0x01, 0x02, 0x03, 0x04 };
+	PACKETPP_ASSERT(memcmp(rawPacket->getRawData(), expectedBuffer, 18) == 0, "Raw packet data is different than expected");
+	delete(ethPacket);
+	PACKETPP_TEST_PASSED;
+}
+
 PACKETPP_TEST(EthAndArpPacketParsing) {
 	int bufferLength = 0;
 	uint8_t* buffer = readFileIntoBuffer("PacketExamples/ArpResponsePacket.dat", bufferLength);
@@ -361,7 +390,7 @@ PACKETPP_TEST(Ipv4PacketParsing)
 {
 	int bufferLength = 0;
 	uint8_t* buffer = readFileIntoBuffer("PacketExamples/IcmpPacket.dat", bufferLength);
-	PACKETPP_ASSERT(!(buffer == NULL), "cannot read file");
+	PACKETPP_ASSERT(!(buffer == NULL), "cannot read file IcmpPacket.dat");
 
 	timeval time;
 	gettimeofday(&time, NULL);
@@ -383,9 +412,26 @@ PACKETPP_TEST(Ipv4PacketParsing)
 	PACKETPP_ASSERT(ipv4Layer->getIPv4Header()->ipVersion == 4, "IP version isn't 4. Version is: %d", ipv4Layer->getIPv4Header()->ipVersion);
 	PACKETPP_ASSERT(ipv4Layer->getIPv4Header()->ipSrc == ip4addr1.toInt(), "incorrect source address");
 	PACKETPP_ASSERT(ipv4Layer->getIPv4Header()->ipDst == ip4addr2.toInt(), "incorrect dest address");
-	PACKETPP_ASSERT(ipv4Layer->getFirstOptionData() == NULL, "Managed to get the first IPv4 option although packet doesn't contain any options");
-	PACKETPP_ASSERT(ipv4Layer->getOptionData(IPV4OPT_CommercialSecurity) == NULL, "Managed to get an IPv4 option by type although packet doesn't contain any options");
-	PACKETPP_ASSERT(ipv4Layer->getOptionsCount() == 0, "IPv4 option count isn't 0");
+	PACKETPP_ASSERT(ipv4Layer->getFirstOption().isNull() == true, "Managed to get the first IPv4 option although packet doesn't contain any options");
+	PACKETPP_ASSERT(ipv4Layer->getOption(IPV4OPT_CommercialSecurity).isNull() == true, "Managed to get an IPv4 option by type although packet doesn't contain any options");
+	PACKETPP_ASSERT(ipv4Layer->getOptionCount() == 0, "IPv4 option count isn't 0");
+
+
+	int buffer2Length = 0;
+	uint8_t* buffer2 = readFileIntoBuffer("PacketExamples/IPv4-TSO.dat", buffer2Length);
+	PACKETPP_ASSERT(!(buffer2 == NULL), "cannot read file IPv4-TSO.dat");
+
+	RawPacket rawPacket2((const uint8_t*)buffer2, buffer2Length, time, true);
+
+	Packet ip4TSO(&rawPacket2);
+
+	ipv4Layer = ip4TSO.getLayerOfType<IPv4Layer>();
+	PACKETPP_ASSERT(ipv4Layer != NULL, "IPv4 TSO: cannot get IPv4 layer");
+	PACKETPP_ASSERT(ipv4Layer->getHeaderLen() == 20, "IPv4 TSO: header len is not 20");
+	PACKETPP_ASSERT(ipv4Layer->getIPv4Header()->totalLength == 0 ,"IPv4 TSO: total length is not 0, it's %d", ipv4Layer->getIPv4Header()->totalLength);
+	PACKETPP_ASSERT(ipv4Layer->getDataLen() == 60, "IPv4 TSO: data len is not 60");
+	PACKETPP_ASSERT(ipv4Layer->getNextLayer() != NULL, "IPv4 TSO: next layer is NULL");
+	PACKETPP_ASSERT(ipv4Layer->getNextLayer()->getProtocol() == ICMP, "IPv4 TSO: next layer type isn't ICMP");
 
 	PACKETPP_TEST_PASSED;
 }
@@ -497,87 +543,85 @@ PACKETPP_TEST(Ipv4OptionsParsingTest)
 	IPv4Layer* ipLayer = ipOpt1.getLayerOfType<IPv4Layer>();
 	PACKETPP_ASSERT(ipLayer != NULL, "Coudln't find ipOpt1 IPv4 layer");
 	PACKETPP_ASSERT(ipLayer->getHeaderLen() == 44, "ipOpt1 header length isn't 44 Bytes");
-	PACKETPP_ASSERT(ipLayer->getOptionsCount() == 3, "ipOpt1 option count isn't 3");
-	IPv4OptionData* opt = ipLayer->getFirstOptionData();
-	PACKETPP_ASSERT(opt != NULL, "ipOpt1 first option is NULL");
-	PACKETPP_ASSERT(opt->getType() == IPV4OPT_CommercialSecurity, "ipOpt1 first option isn't commercial-security");
-	PACKETPP_ASSERT(opt->getDataSize() == 20, "ipOpt1 first option data size isn't 20");
-	PACKETPP_ASSERT(opt->getTotalSize() == 22, "ipOpt1 first option total size isn't 22");
-	PACKETPP_ASSERT(opt->getValueAs<uint32_t>() == htonl(2), "ipOpt1 first int value isn't 2");
-	PACKETPP_ASSERT(opt->getValueAs<uint8_t>(4) == 2, "ipOpt1 value in offset 4 isn't 2");
-	opt = ipLayer->getNextOptionData(opt);
-	PACKETPP_ASSERT(opt != NULL, "ipOpt1 second option is NULL");
-	PACKETPP_ASSERT(opt->getType() == IPV4OPT_EndOfOtionsList, "ipOpt1 second option isn't end-of-option-list");
-	PACKETPP_ASSERT(opt->getType() == 0, "ipOpt1 second option isn't end-of-option-list");
-	opt = ipLayer->getNextOptionData(opt);
-	PACKETPP_ASSERT(opt != NULL, "ipOpt1 third option is NULL");
-	PACKETPP_ASSERT(opt->getType() == IPV4OPT_EndOfOtionsList, "ipOpt1 second option isn't end-of-option-list");
-	PACKETPP_ASSERT(opt->getType() == 0, "ipOpt1 second option isn't end-of-option-list");
-	opt = ipLayer->getNextOptionData(opt);
-	PACKETPP_ASSERT(opt == NULL, "ipOpt1 fourth option isn't NULL");
-	opt = ipLayer->getOptionData(IPV4OPT_EndOfOtionsList);
-	PACKETPP_ASSERT(opt != NULL, "ipOpt1 couldn't retrieve option by type");
-	PACKETPP_ASSERT(opt->getType() == IPV4OPT_EndOfOtionsList, "ipOpt1 type if retrieved option isn't end-of-option-list");
-	PACKETPP_ASSERT(ipLayer->getOptionData(IPV4OPT_Timestamp) == NULL, "ipOpt1 Managed to reprieve timestamp option although doens't exist in the packet");
+	PACKETPP_ASSERT(ipLayer->getOptionCount() == 3, "ipOpt1 option count isn't 3");
+	IPv4Option opt = ipLayer->getFirstOption();
+	PACKETPP_ASSERT(opt.isNull() == false, "ipOpt1 first option is NULL");
+	PACKETPP_ASSERT(opt.getIPv4OptionType() == IPV4OPT_CommercialSecurity, "ipOpt1 first option isn't commercial-security");
+	PACKETPP_ASSERT(opt.getDataSize() == 20, "ipOpt1 first option data size isn't 20");
+	PACKETPP_ASSERT(opt.getTotalSize() == 22, "ipOpt1 first option total size isn't 22");
+	PACKETPP_ASSERT(opt.getValueAs<uint32_t>() == htonl(2), "ipOpt1 first int value isn't 2");
+	PACKETPP_ASSERT(opt.getValueAs<uint8_t>(4) == 2, "ipOpt1 value in offset 4 isn't 2");
+	opt = ipLayer->getNextOption(opt);
+	PACKETPP_ASSERT(opt.isNull() == false, "ipOpt1 second option is NULL");
+	PACKETPP_ASSERT(opt.getIPv4OptionType() == IPV4OPT_EndOfOtionsList, "ipOpt1 second option isn't end-of-option-list");
+	opt = ipLayer->getNextOption(opt);
+	PACKETPP_ASSERT(opt.isNull() == false, "ipOpt1 third option is NULL");
+	PACKETPP_ASSERT(opt.getIPv4OptionType() == IPV4OPT_EndOfOtionsList, "ipOpt1 second option isn't end-of-option-list");
+	opt = ipLayer->getNextOption(opt);
+	PACKETPP_ASSERT(opt.isNull() == true, "ipOpt1 fourth option isn't NULL");
+	opt = ipLayer->getOption(IPV4OPT_EndOfOtionsList);
+	PACKETPP_ASSERT(opt.isNull() == false, "ipOpt1 couldn't retrieve option by type");
+	PACKETPP_ASSERT(opt.getIPv4OptionType() == IPV4OPT_EndOfOtionsList, "ipOpt1 type if retrieved option isn't end-of-option-list");
+	PACKETPP_ASSERT(ipLayer->getOption(IPV4OPT_Timestamp).isNull() == true, "ipOpt1 Managed to reprieve timestamp option although doens't exist in the packet");
 
 	ipLayer = ipOpt2.getLayerOfType<IPv4Layer>();
 	PACKETPP_ASSERT(ipLayer != NULL, "Coudln't find ipOpt2 IPv4 layer");
 	PACKETPP_ASSERT(ipLayer->getHeaderLen() == 60, "ipOpt2 header length isn't 60 Bytes");
-	PACKETPP_ASSERT(ipLayer->getOptionsCount() == 1, "ipOpt2 option count isn't 1");
-	opt = ipLayer->getFirstOptionData();
-	PACKETPP_ASSERT(opt != NULL, "ipOpt2 first option is NULL");
-	PACKETPP_ASSERT(opt->getType() == IPV4OPT_Timestamp, "ipOpt2 first option isn't timestamp");
-	PACKETPP_ASSERT(opt->getDataSize() == 38, "ipOpt2 first option data size isn't 38");
-	PACKETPP_ASSERT(opt->getTotalSize() == 40, "ipOpt2 first option total size isn't 40");
-	IPv4TimestampOptionValue tsValue = opt->getTimestampOptionValue();
+	PACKETPP_ASSERT(ipLayer->getOptionCount() == 1, "ipOpt2 option count isn't 1");
+	opt = ipLayer->getFirstOption();
+	PACKETPP_ASSERT(opt.isNull() == false, "ipOpt2 first option is NULL");
+	PACKETPP_ASSERT(opt.getIPv4OptionType() == IPV4OPT_Timestamp, "ipOpt2 first option isn't timestamp");
+	PACKETPP_ASSERT(opt.getDataSize() == 38, "ipOpt2 first option data size isn't 38");
+	PACKETPP_ASSERT(opt.getTotalSize() == 40, "ipOpt2 first option total size isn't 40");
+	IPv4TimestampOptionValue tsValue = opt.getTimestampOptionValue();
 	PACKETPP_ASSERT(tsValue.type == IPv4TimestampOptionValue::TimestampOnly, "ipOpt2 ts type isn't TimestampOnly");
 	PACKETPP_ASSERT(tsValue.timestamps.size() == 1, "ipOpt2 ts value contains more than 1 ts");
 	PACKETPP_ASSERT(tsValue.ipAddresses.size() == 0, "ipOpt2 ts value contains more than 0 IPs");
 	PACKETPP_ASSERT(tsValue.timestamps.at(0) == htonl(82524601), "ipOpt2 ts value first ts isn't 82524601");
-	opt = ipLayer->getNextOptionData(opt);
-	PACKETPP_ASSERT(opt == NULL, "ipOpt2 second option isn't NULL");
+	opt = ipLayer->getNextOption(opt);
+	PACKETPP_ASSERT(opt.isNull() == true, "ipOpt2 second option isn't NULL");
 
 	ipLayer = ipOpt3.getLayerOfType<IPv4Layer>();
 	PACKETPP_ASSERT(ipLayer != NULL, "Coudln't find ipOpt3 IPv4 layer");
 	PACKETPP_ASSERT(ipLayer->getHeaderLen() == 24, "ipOpt3 header length isn't 24 Bytes");
-	PACKETPP_ASSERT(ipLayer->getOptionsCount() == 1, "ipOpt3 option count isn't 1");
-	opt = ipLayer->getFirstOptionData();
-	PACKETPP_ASSERT(opt != NULL, "ipOpt3 first option is NULL");
-	PACKETPP_ASSERT(opt->getType() == IPV4OPT_RouterAlert, "ipOpt3 first option isn't router-alert");
-	PACKETPP_ASSERT(opt->getDataSize() == 2, "ipOpt3 first option data size isn't 2");
-	PACKETPP_ASSERT(opt->getTotalSize() == 4, "ipOpt3 first option total size isn't 4");
-	PACKETPP_ASSERT(opt->getValueAs<uint16_t>() == 0, "ipOpt3 value isn't 0");
-	opt = ipLayer->getNextOptionData(opt);
-	PACKETPP_ASSERT(opt == NULL, "ipOpt3 second option isn't NULL");
+	PACKETPP_ASSERT(ipLayer->getOptionCount() == 1, "ipOpt3 option count isn't 1");
+	opt = ipLayer->getFirstOption();
+	PACKETPP_ASSERT(opt.isNull() == false, "ipOpt3 first option is NULL");
+	PACKETPP_ASSERT(opt.getIPv4OptionType() == IPV4OPT_RouterAlert, "ipOpt3 first option isn't router-alert");
+	PACKETPP_ASSERT(opt.getDataSize() == 2, "ipOpt3 first option data size isn't 2");
+	PACKETPP_ASSERT(opt.getTotalSize() == 4, "ipOpt3 first option total size isn't 4");
+	PACKETPP_ASSERT(opt.getValueAs<uint16_t>() == 0, "ipOpt3 value isn't 0");
+	opt = ipLayer->getNextOption(opt);
+	PACKETPP_ASSERT(opt.isNull() == true, "ipOpt3 second option isn't NULL");
 
 	ipLayer = ipOpt4.getLayerOfType<IPv4Layer>();
 	PACKETPP_ASSERT(ipLayer != NULL, "Coudln't find ipOpt4 IPv4 layer");
 	PACKETPP_ASSERT(ipLayer->getHeaderLen() == 60, "ipOpt4 header length isn't 60 Bytes");
-	PACKETPP_ASSERT(ipLayer->getOptionsCount() == 2, "ipOpt4 option count isn't 2");
-	opt = ipLayer->getFirstOptionData();
-	PACKETPP_ASSERT(opt != NULL, "ipOpt4 first option is NULL");
-	PACKETPP_ASSERT(opt->getType() == IPV4OPT_RecordRoute, "ipOpt4 first option isn't record-route");
-	PACKETPP_ASSERT(opt->getDataSize() == 37, "ipOpt4 first option data size isn't 37");
-	PACKETPP_ASSERT(opt->getTotalSize() == 39, "ipOpt4 first option total size isn't 39");
-	std::vector<IPv4Address> ipAddrs = opt->getValueAsIpList();
+	PACKETPP_ASSERT(ipLayer->getOptionCount() == 2, "ipOpt4 option count isn't 2");
+	opt = ipLayer->getFirstOption();
+	PACKETPP_ASSERT(opt.isNull() == false, "ipOpt4 first option is NULL");
+	PACKETPP_ASSERT(opt.getIPv4OptionType() == IPV4OPT_RecordRoute, "ipOpt4 first option isn't record-route");
+	PACKETPP_ASSERT(opt.getDataSize() == 37, "ipOpt4 first option data size isn't 37");
+	PACKETPP_ASSERT(opt.getTotalSize() == 39, "ipOpt4 first option total size isn't 39");
+	std::vector<IPv4Address> ipAddrs = opt.getValueAsIpList();
 	PACKETPP_ASSERT(ipAddrs.size() == 3, "ipOpt4 number of IP addresses isn't 3");
 	PACKETPP_ASSERT(ipAddrs.at(0) == IPv4Address(std::string("1.2.3.4")), "ipOpt4 first IP addr isn't 1.2.3.4");
 	PACKETPP_ASSERT(ipAddrs.at(1) == IPv4Address(std::string("10.0.0.138")), "ipOpt4 second IP addr isn't 10.0.0.138");
 	PACKETPP_ASSERT(ipAddrs.at(2) == IPv4Address(std::string("10.0.0.138")), "ipOpt4 third IP addr isn't 10.0.0.138");
-	IPv4OptionData* opt2 = ipLayer->getOptionData(IPV4OPT_RecordRoute);
-	PACKETPP_ASSERT(opt2 != NULL, "ipOpt4 couldn't retrieve option by type");
+	IPv4Option opt2 = ipLayer->getOption(IPV4OPT_RecordRoute);
+	PACKETPP_ASSERT(opt2.isNull() == false, "ipOpt4 couldn't retrieve option by type");
 	PACKETPP_ASSERT(opt2 == opt, "ipOpt4 option retrieved by type and by getFirstOptionData aren't the same pointer");
 
 	ipLayer = ipOpt5.getLayerOfType<IPv4Layer>();
 	PACKETPP_ASSERT(ipLayer != NULL, "Coudln't find ipOpt5 IPv4 layer");
 	PACKETPP_ASSERT(ipLayer->getHeaderLen() == 56, "ipOpt5 header length isn't 56 Bytes");
-	PACKETPP_ASSERT(ipLayer->getOptionsCount() == 1, "ipOpt5 option count isn't 1");
-	opt = ipLayer->getFirstOptionData();
-	PACKETPP_ASSERT(opt != NULL, "ipOpt5 first option is NULL");
-	PACKETPP_ASSERT(opt->getType() == IPV4OPT_Timestamp, "ipOpt5 first option isn't timestamp");
-	PACKETPP_ASSERT(opt->getDataSize() == 34, "ipOpt5 first option data size isn't 34");
-	PACKETPP_ASSERT(opt->getTotalSize() == 36, "ipOpt5 first option total size isn't 36");
-	tsValue = opt->getTimestampOptionValue();
+	PACKETPP_ASSERT(ipLayer->getOptionCount() == 1, "ipOpt5 option count isn't 1");
+	opt = ipLayer->getFirstOption();
+	PACKETPP_ASSERT(opt.isNull() == false, "ipOpt5 first option is NULL");
+	PACKETPP_ASSERT(opt.getIPv4OptionType() == IPV4OPT_Timestamp, "ipOpt5 first option isn't timestamp");
+	PACKETPP_ASSERT(opt.getDataSize() == 34, "ipOpt5 first option data size isn't 34");
+	PACKETPP_ASSERT(opt.getTotalSize() == 36, "ipOpt5 first option total size isn't 36");
+	tsValue = opt.getTimestampOptionValue();
 	PACKETPP_ASSERT(tsValue.type == IPv4TimestampOptionValue::TimestampAndIP, "ipOpt5 ts type isn't TimestampAndIP");
 	PACKETPP_ASSERT(tsValue.timestamps.size() == 3, "ipOpt5 ts value doesn't contain 3 ts");
 	PACKETPP_ASSERT(tsValue.ipAddresses.size() == 3, "ipOpt5 ts value deosn't contain 3 IPs");
@@ -585,49 +629,49 @@ PACKETPP_TEST(Ipv4OptionsParsingTest)
 	PACKETPP_ASSERT(tsValue.timestamps.at(2) == htonl(77233718), "ipOpt5 ts value third ts isn't 77233718");
 	PACKETPP_ASSERT(tsValue.ipAddresses.at(0) == IPv4Address(std::string("10.0.0.6")), "ipOpt5 ts value first IP isn't 10.0.0.6");
 	PACKETPP_ASSERT(tsValue.ipAddresses.at(1) == IPv4Address(std::string("10.0.0.138")), "ipOpt5 ts value second IP isn't 10.0.0.138");
-	opt = ipLayer->getNextOptionData(opt);
-	PACKETPP_ASSERT(opt == NULL, "ipOpt5 second option isn't NULL");
+	opt = ipLayer->getNextOption(opt);
+	PACKETPP_ASSERT(opt.isNull() == true, "ipOpt5 second option isn't NULL");
 
 	ipLayer = ipOpt6.getLayerOfType<IPv4Layer>();
 	PACKETPP_ASSERT(ipLayer != NULL, "Coudln't find ipOpt6 IPv4 layer");
 	PACKETPP_ASSERT(ipLayer->getHeaderLen() == 28, "ipOpt6 header length isn't 28 Bytes");
-	PACKETPP_ASSERT(ipLayer->getOptionsCount() == 2, "ipOpt6 option count isn't 2");
-	opt = ipLayer->getFirstOptionData();
-	PACKETPP_ASSERT(opt != NULL, "ipOpt6 first option is NULL");
-	PACKETPP_ASSERT(opt->getType() == IPV4OPT_NOP, "ipOpt6 first option isn't nop");
-	PACKETPP_ASSERT(opt->getDataSize() == 0, "ipOpt6 first option data size isn't 0");
-	PACKETPP_ASSERT(opt->getTotalSize() == 1, "ipOpt6 first option total size isn't 1");
-	opt = ipLayer->getNextOptionData(opt);
-	PACKETPP_ASSERT(opt != NULL, "ipOpt6 second option is NULL");
-	PACKETPP_ASSERT(opt->getType() == IPV4OPT_StrictSourceRoute, "ipOpt6 second option isn't strict-source-route");
-	PACKETPP_ASSERT(opt->getDataSize() == 5, "ipOpt6 second option data size isn't 5");
-	PACKETPP_ASSERT(opt->getTotalSize() == 7, "ipOpt6 second option total size isn't 7");
-	ipAddrs = opt->getValueAsIpList();
+	PACKETPP_ASSERT(ipLayer->getOptionCount() == 2, "ipOpt6 option count isn't 2");
+	opt = ipLayer->getFirstOption();
+	PACKETPP_ASSERT(opt.isNull() == false, "ipOpt6 first option is NULL");
+	PACKETPP_ASSERT(opt.getIPv4OptionType() == IPV4OPT_NOP, "ipOpt6 first option isn't nop");
+	PACKETPP_ASSERT(opt.getDataSize() == 0, "ipOpt6 first option data size isn't 0");
+	PACKETPP_ASSERT(opt.getTotalSize() == 1, "ipOpt6 first option total size isn't 1");
+	opt = ipLayer->getNextOption(opt);
+	PACKETPP_ASSERT(opt.isNull() == false, "ipOpt6 second option is NULL");
+	PACKETPP_ASSERT(opt.getIPv4OptionType() == IPV4OPT_StrictSourceRoute, "ipOpt6 second option isn't strict-source-route");
+	PACKETPP_ASSERT(opt.getDataSize() == 5, "ipOpt6 second option data size isn't 5");
+	PACKETPP_ASSERT(opt.getTotalSize() == 7, "ipOpt6 second option total size isn't 7");
+	ipAddrs = opt.getValueAsIpList();
 	PACKETPP_ASSERT(ipAddrs.size() == 0, "ipOpt6 number of IP addresses isn't 0");
-	opt = ipLayer->getNextOptionData(opt);
-	PACKETPP_ASSERT(opt == NULL, "ipOpt6 third option isn't NULL");
+	opt = ipLayer->getNextOption(opt);
+	PACKETPP_ASSERT(opt.isNull() == true, "ipOpt6 third option isn't NULL");
 
 	ipLayer = ipOpt7.getLayerOfType<IPv4Layer>();
 	PACKETPP_ASSERT(ipLayer != NULL, "Coudln't find ipOpt7 IPv4 layer");
 	PACKETPP_ASSERT(ipLayer->getHeaderLen() == 28, "ipOpt7 header length isn't 28 Bytes");
-	PACKETPP_ASSERT(ipLayer->getOptionsCount() == 2, "ipOpt7 option count isn't 2");
-	opt = ipLayer->getFirstOptionData();
-	PACKETPP_ASSERT(opt != NULL, "ipOpt7 first option is NULL");
-	PACKETPP_ASSERT(opt->getType() == IPV4OPT_NOP, "ipOpt7 first option isn't nop");
-	PACKETPP_ASSERT(opt->getDataSize() == 0, "ipOpt7 first option data size isn't 0");
-	PACKETPP_ASSERT(opt->getTotalSize() == 1, "ipOpt7 first option total size isn't 1");
-	opt = ipLayer->getNextOptionData(opt);
-	PACKETPP_ASSERT(opt != NULL, "ipOpt7 second option is NULL");
-	PACKETPP_ASSERT(opt->getType() == IPV4OPT_LooseSourceRoute, "ipOpt7 second option isn't loose-source-route");
-	PACKETPP_ASSERT(opt->getDataSize() == 5, "ipOpt7 second option data size isn't 5");
-	PACKETPP_ASSERT(opt->getTotalSize() == 7, "ipOpt7 second option total size isn't 7");
-	ipAddrs = opt->getValueAsIpList();
+	PACKETPP_ASSERT(ipLayer->getOptionCount() == 2, "ipOpt7 option count isn't 2");
+	opt = ipLayer->getFirstOption();
+	PACKETPP_ASSERT(opt.isNull() == false, "ipOpt7 first option is NULL");
+	PACKETPP_ASSERT(opt.getIPv4OptionType() == IPV4OPT_NOP, "ipOpt7 first option isn't nop");
+	PACKETPP_ASSERT(opt.getDataSize() == 0, "ipOpt7 first option data size isn't 0");
+	PACKETPP_ASSERT(opt.getTotalSize() == 1, "ipOpt7 first option total size isn't 1");
+	opt = ipLayer->getNextOption(opt);
+	PACKETPP_ASSERT(opt.isNull() == false, "ipOpt7 second option is NULL");
+	PACKETPP_ASSERT(opt.getIPv4OptionType() == IPV4OPT_LooseSourceRoute, "ipOpt7 second option isn't loose-source-route");
+	PACKETPP_ASSERT(opt.getDataSize() == 5, "ipOpt7 second option data size isn't 5");
+	PACKETPP_ASSERT(opt.getTotalSize() == 7, "ipOpt7 second option total size isn't 7");
+	ipAddrs = opt.getValueAsIpList();
 	PACKETPP_ASSERT(ipAddrs.size() == 0, "ipOpt7 number of IP addresses isn't 0");
-	opt2 = ipLayer->getOptionData(IPV4OPT_LooseSourceRoute);
-	PACKETPP_ASSERT(opt2 != NULL, "ipOpt7 couldn't retrieve option by type");
+	opt2 = ipLayer->getOption(IPV4OPT_LooseSourceRoute);
+	PACKETPP_ASSERT(opt2.isNull() == false, "ipOpt7 couldn't retrieve option by type");
 	PACKETPP_ASSERT(opt2 == opt, "ipOpt7 option retrieved by type and by getNextOptionData aren't the same pointer");
-	opt = ipLayer->getNextOptionData(opt);
-	PACKETPP_ASSERT(opt == NULL, "ipOpt7 third option isn't NULL");
+	opt = ipLayer->getNextOption(opt);
+	PACKETPP_ASSERT(opt.isNull() == true, "ipOpt7 third option isn't NULL");
 
 	PACKETPP_TEST_PASSED;
 }
@@ -704,9 +748,9 @@ PACKETPP_TEST(Ipv4OptionsEditTest)
 
 	IPv4Layer* ipLayer = ipOpt1.getLayerOfType<IPv4Layer>();
 	uint8_t commSecOptionData[] = { 0x00, 0x00, 0x00, 0x02, 0x02, 0x10, 0x00, 0x02, 0x00, 0x00, 0x00, 0x02, 0x00, 0x04, 0x00, 0x05, 0x00, 0x06, 0x00, 0xef };
-	PACKETPP_ASSERT(ipLayer->addOption(IPV4OPT_CommercialSecurity, 20, commSecOptionData) != NULL, "Cannot add commercial security option to packet 1");
-	PACKETPP_ASSERT(ipLayer->addOption(IPV4OPT_EndOfOtionsList, 0, NULL) != NULL, "Cannot add end-of-opt-list option to packet 1");
-	PACKETPP_ASSERT(ipLayer->addOptionAfter(IPV4OPT_EndOfOtionsList, 0, NULL, IPV4OPT_CommercialSecurity) != NULL, "Cannot add 2nd end-of-opt-list option to packet 1");
+	PACKETPP_ASSERT(ipLayer->addOption(IPv4OptionBuilder(IPV4OPT_CommercialSecurity, commSecOptionData, 20)).isNull() == false, "Cannot add commercial security option to packet 1");
+	PACKETPP_ASSERT(ipLayer->addOption(IPv4OptionBuilder(IPV4OPT_EndOfOtionsList, NULL, 0)).isNull() == false, "Cannot add end-of-opt-list option to packet 1");
+	PACKETPP_ASSERT(ipLayer->addOptionAfter(IPv4OptionBuilder(IPV4OPT_EndOfOtionsList, NULL, 0), IPV4OPT_CommercialSecurity).isNull() == false, "Cannot add 2nd end-of-opt-list option to packet 1");
 	ipOpt1.computeCalculateFields();
 
 
@@ -719,7 +763,7 @@ PACKETPP_TEST(Ipv4OptionsEditTest)
 	tsOption.timestamps.push_back(82524601);
 	for (int i = 0; i < 8; i++)
 		tsOption.timestamps.push_back(0);
-	PACKETPP_ASSERT(ipLayer->addTimestampOption(tsOption) != NULL, "Cannot add timestamp option to packet 2");
+	PACKETPP_ASSERT(ipLayer->addOption(IPv4OptionBuilder(tsOption)).isNull() == false, "Cannot add timestamp option to packet 2");
 	ipOpt2.computeCalculateFields();
 	PACKETPP_ASSERT(buffer22Length == ipOpt2.getRawPacket()->getRawDataLen(), "ipOpt2 len (%d) is different than read packet len (%d)", ipOpt2.getRawPacket()->getRawDataLen(), buffer22Length);
 	PACKETPP_ASSERT(memcmp(ipOpt2.getRawPacket()->getRawData(), buffer22, ipOpt2.getRawPacket()->getRawDataLen()) == 0, "ipOpt2: Raw packet data is different than expected");
@@ -727,7 +771,7 @@ PACKETPP_TEST(Ipv4OptionsEditTest)
 
 	ipLayer = ipOpt3.getLayerOfType<IPv4Layer>();
 	uint16_t routerAlerVal = 0;
-	PACKETPP_ASSERT(ipLayer->addOption(IPV4OPT_RouterAlert, sizeof(uint16_t), (uint8_t*)&routerAlerVal) != NULL, "Cannot add router alert option to packet 3");
+	PACKETPP_ASSERT(ipLayer->addOption(IPv4OptionBuilder(IPV4OPT_RouterAlert, (uint16_t)routerAlerVal)).isNull() == false, "Cannot add router alert option to packet 3");
 	ipOpt3.computeCalculateFields();
 	PACKETPP_ASSERT(buffer33Length == ipOpt3.getRawPacket()->getRawDataLen(), "ipOpt3 len (%d) is different than read packet len (%d)", ipOpt3.getRawPacket()->getRawDataLen(), buffer33Length);
 	PACKETPP_ASSERT(memcmp(ipOpt3.getRawPacket()->getRawData(), buffer33, ipOpt3.getRawPacket()->getRawDataLen()) == 0, "ipOpt3: Raw packet data is different than expected");
@@ -740,8 +784,8 @@ PACKETPP_TEST(Ipv4OptionsEditTest)
 	ipListValue.push_back(IPv4Address(std::string("10.0.0.138")));
 	for (int i = 0; i < 6; i++)
 		ipListValue.push_back(IPv4Address::Zero);
-	PACKETPP_ASSERT(ipLayer->addOption(IPV4OPT_RecordRoute, ipListValue) != NULL, "Cannot add record route option to packet 4");
-	PACKETPP_ASSERT(ipLayer->addOption(IPV4OPT_EndOfOtionsList, 0, NULL) != NULL, "Cannot add end-of-opt-list option to packet 4");
+	PACKETPP_ASSERT(ipLayer->addOption(IPv4OptionBuilder(IPV4OPT_RecordRoute, ipListValue)).isNull() == false, "Cannot add record route option to packet 4");
+	PACKETPP_ASSERT(ipLayer->addOption(IPv4OptionBuilder(IPV4OPT_EndOfOtionsList, NULL, 0)).isNull() == false, "Cannot add end-of-opt-list option to packet 4");
 	ipOpt4.computeCalculateFields();
 	PACKETPP_ASSERT(buffer44Length == ipOpt4.getRawPacket()->getRawDataLen(), "ipOpt4 len (%d) is different than read packet len (%d)", ipOpt4.getRawPacket()->getRawDataLen(), buffer44Length);
 	PACKETPP_ASSERT(memcmp(ipOpt4.getRawPacket()->getRawData(), buffer44, ipOpt4.getRawPacket()->getRawDataLen()) == 0, "ipOpt4: Raw packet data is different than expected");
@@ -750,7 +794,7 @@ PACKETPP_TEST(Ipv4OptionsEditTest)
 	ipLayer = ipOpt5.getLayerOfType<IPv4Layer>();
 	tsOption.clear();
 	LoggerPP::getInstance().supressErrors();
-	PACKETPP_ASSERT(ipLayer->addTimestampOption(tsOption) == NULL, "Managed to add an empty timestamp value");
+	PACKETPP_ASSERT(ipLayer->addOption(IPv4OptionBuilder(tsOption)).isNull() == true, "Managed to add an empty timestamp value");
 	LoggerPP::getInstance().enableErrors();
 	tsOption.type = IPv4TimestampOptionValue::TimestampAndIP;
 	tsOption.ipAddresses.push_back(IPv4Address(std::string("10.0.0.6")));
@@ -758,18 +802,18 @@ PACKETPP_TEST(Ipv4OptionsEditTest)
 	tsOption.ipAddresses.push_back(IPv4Address(std::string("10.0.0.138")));
 	tsOption.ipAddresses.push_back(IPv4Address::Zero);
 	LoggerPP::getInstance().supressErrors();
-	PACKETPP_ASSERT(ipLayer->addTimestampOption(tsOption) == NULL, "Managed to set timestamp option value with non-equal number of timestamps and IPs");
+	PACKETPP_ASSERT(ipLayer->addOption(IPv4OptionBuilder(tsOption)).isNull() == true, "Managed to set timestamp option value with non-equal number of timestamps and IPs");
 	LoggerPP::getInstance().enableErrors();
 	tsOption.timestamps.push_back(70037668);
 	tsOption.timestamps.push_back(77233718);
 	tsOption.timestamps.push_back(77233718);
 	tsOption.timestamps.push_back(0);
-	IPv4OptionData* optData = ipLayer->addTimestampOption(tsOption);
-	PACKETPP_ASSERT(optData != NULL, "Cannot add timestamp option to packet 5");
-	PACKETPP_ASSERT(optData->getType() == IPV4OPT_Timestamp, "Packet 5: timestamp option doesn't have type IPV4OPT_Timestamp");
-	PACKETPP_ASSERT(optData->getTotalSize() == 36, "Packet 5: timestamp option length isn't 36");
+	IPv4Option optData = ipLayer->addOption(IPv4OptionBuilder(tsOption));
+	PACKETPP_ASSERT(optData.isNull() == false, "Cannot add timestamp option to packet 5");
+	PACKETPP_ASSERT(optData.getIPv4OptionType() == IPV4OPT_Timestamp, "Packet 5: timestamp option doesn't have type IPV4OPT_Timestamp");
+	PACKETPP_ASSERT(optData.getTotalSize() == 36, "Packet 5: timestamp option length isn't 36");
 	tsOption.clear();
-	tsOption = optData->getTimestampOptionValue();
+	tsOption = optData.getTimestampOptionValue();
 	PACKETPP_ASSERT(tsOption.type == IPv4TimestampOptionValue::TimestampAndIP, "Packet 5: timestamp data type isn't TimestampAndIP");
 	PACKETPP_ASSERT(tsOption.timestamps.size() == 3, "Packet 5: number of timestamps isn't 3");
 	PACKETPP_ASSERT(tsOption.timestamps.at(1) == htonl(77233718), "Packet 5: timestamps[1] isn't 77233718");
@@ -779,34 +823,32 @@ PACKETPP_TEST(Ipv4OptionsEditTest)
 	PACKETPP_ASSERT(buffer55Length == ipOpt5.getRawPacket()->getRawDataLen(), "ipOpt5 len (%d) is different than read packet len (%d)", ipOpt5.getRawPacket()->getRawDataLen(), buffer55Length);
 	PACKETPP_ASSERT(memcmp(ipOpt5.getRawPacket()->getRawData(), buffer55, ipOpt5.getRawPacket()->getRawDataLen()) == 0, "ipOpt5: Raw packet data is different than expected");
 
-
 	ipLayer = ipOpt6.getLayerOfType<IPv4Layer>();
 	ipListValue.clear();
 	ipListValue.push_back(IPv4Address::Zero);
-	optData = ipLayer->addOption(IPV4OPT_StrictSourceRoute, ipListValue);
-	PACKETPP_ASSERT(optData != NULL, "Cannot add strict source route option to packet 6");
-	PACKETPP_ASSERT(optData->getType() == IPV4OPT_StrictSourceRoute, "Packet 6: strict source route option doesn't have type IPV4OPT_StrictSourceRoute");
-	PACKETPP_ASSERT(optData->getTotalSize() == 7, "Packet 6: strict source route length isn't 7");
-	ipListValue = optData->getValueAsIpList();
+	optData = ipLayer->addOption(IPv4OptionBuilder(IPV4OPT_StrictSourceRoute, ipListValue));
+	PACKETPP_ASSERT(optData.isNull() == false, "Cannot add strict source route option to packet 6");
+	PACKETPP_ASSERT(optData.getIPv4OptionType() == IPV4OPT_StrictSourceRoute, "Packet 6: strict source route option doesn't have type IPV4OPT_StrictSourceRoute");
+	PACKETPP_ASSERT(optData.getTotalSize() == 7, "Packet 6: strict source route length isn't 7");
+	ipListValue = optData.getValueAsIpList();
 	PACKETPP_ASSERT(ipListValue.size() == 0, "Packet 6: strict source route IP list value length isn't 0");
-	optData = ipLayer->addOptionAfter(IPV4OPT_NOP, 0, NULL);
-	PACKETPP_ASSERT(optData != NULL, "Cannot add NOP option to packet 6");
-	PACKETPP_ASSERT(optData->getType() == IPV4OPT_NOP, "Packet 6: NOP option doesn't have type NOP");
-	PACKETPP_ASSERT(optData->getTotalSize() == 1, "Packet 6: NOP option length isn't 1");
+	optData = ipLayer->addOptionAfter(IPv4OptionBuilder(IPV4OPT_NOP, NULL, 0));
+	PACKETPP_ASSERT(optData.isNull() == false, "Cannot add NOP option to packet 6");
+	PACKETPP_ASSERT(optData.getIPv4OptionType() == IPV4OPT_NOP, "Packet 6: NOP option doesn't have type NOP");
+	PACKETPP_ASSERT(optData.getTotalSize() == 1, "Packet 6: NOP option length isn't 1");
 	ipOpt6.computeCalculateFields();
 	PACKETPP_ASSERT(buffer66Length == ipOpt6.getRawPacket()->getRawDataLen(), "ipOpt6 len (%d) is different than read packet len (%d)", ipOpt6.getRawPacket()->getRawDataLen(), buffer66Length);
 	PACKETPP_ASSERT(memcmp(ipOpt6.getRawPacket()->getRawData(), buffer66, ipOpt6.getRawPacket()->getRawDataLen()) == 0, "ipOpt6: Raw packet data is different than expected");
 
-
 	ipLayer = ipOpt7.getLayerOfType<IPv4Layer>();
-	PACKETPP_ASSERT(ipLayer->addOption(IPV4OPT_NOP, 0, NULL) != NULL, "Cannot add NOP option to packet 7");
+	PACKETPP_ASSERT(ipLayer->addOption(IPv4OptionBuilder(IPV4OPT_NOP, NULL, 0)).isNull() == false, "Cannot add NOP option to packet 7");
 	ipListValue.clear();
 	ipListValue.push_back(IPv4Address::Zero);
-	PACKETPP_ASSERT(ipLayer->addOption(IPV4OPT_LooseSourceRoute, ipListValue) != NULL, "Cannot add loose source route option to packet 7");
+	PACKETPP_ASSERT(ipLayer->addOption(IPv4OptionBuilder(IPV4OPT_LooseSourceRoute, ipListValue)).isNull() == false, "Cannot add loose source route option to packet 7");
 	ipOpt7.computeCalculateFields();
 	PACKETPP_ASSERT(buffer77Length == ipOpt7.getRawPacket()->getRawDataLen(), "ipOpt7 len (%d) is different than read packet len (%d)", ipOpt7.getRawPacket()->getRawDataLen(), buffer77Length);
 	PACKETPP_ASSERT(memcmp(ipOpt7.getRawPacket()->getRawData(), buffer77, ipOpt7.getRawPacket()->getRawDataLen()) == 0, "ipOpt7: Raw packet data is different than expected");
-	PACKETPP_ASSERT(ipLayer->getOptionsCount() == 2, "Packet 7 option count after adding loose source route isn't 2, it's %d", (int)ipLayer->getOptionsCount());
+	PACKETPP_ASSERT(ipLayer->getOptionCount() == 2, "Packet 7 option count after adding loose source route isn't 2, it's %d", (int)ipLayer->getOptionCount());
 
 	tsOption.clear();
 	tsOption.type = IPv4TimestampOptionValue::TimestampAndIP;
@@ -814,29 +856,28 @@ PACKETPP_TEST(Ipv4OptionsEditTest)
 	tsOption.ipAddresses.push_back(IPv4Address::Zero);
 	tsOption.timestamps.push_back(70037668);
 	tsOption.timestamps.push_back(70037669);
-	PACKETPP_ASSERT(ipLayer->addTimestampOptionAfter(tsOption, IPV4OPT_NOP) != NULL, "Cannot add timestamp option to packet 7");
-	PACKETPP_ASSERT(ipLayer->addOptionAfter(IPV4OPT_RouterAlert, sizeof(uint16_t), (uint8_t*)&routerAlerVal) != NULL, "Cannot add router alert option to packet 7");
-	PACKETPP_ASSERT(ipLayer->getOptionsCount() == 4, "Packet 7 option count after adding router alert option isn't 4");
+	PACKETPP_ASSERT(ipLayer->addOptionAfter(IPv4OptionBuilder(tsOption), IPV4OPT_NOP).isNull() == false, "Cannot add timestamp option to packet 7");
+	PACKETPP_ASSERT(ipLayer->addOptionAfter(IPv4OptionBuilder(IPV4OPT_RouterAlert, (uint16_t)routerAlerVal)).isNull() == false, "Cannot add router alert option to packet 7");
+	PACKETPP_ASSERT(ipLayer->getOptionCount() == 4, "Packet 7 option count after adding router alert option isn't 4");
 	ipOpt7.computeCalculateFields();
 	tsOption.clear();
 	tsOption.type = IPv4TimestampOptionValue::TimestampOnly;
 	tsOption.timestamps.push_back(70037670);
-	PACKETPP_ASSERT(ipLayer->addTimestampOption(tsOption) != NULL, "Cannot add 2nd timestamp option to packet 7");
-	PACKETPP_ASSERT(ipLayer->getOptionsCount() == 5, "Packet 7 option count after adding 2nd timestamp option isn't 5");
+	PACKETPP_ASSERT(ipLayer->addOption(IPv4OptionBuilder(tsOption)).isNull() == false, "Cannot add 2nd timestamp option to packet 7");
+	PACKETPP_ASSERT(ipLayer->getOptionCount() == 5, "Packet 7 option count after adding 2nd timestamp option isn't 5");
 	LoggerPP::getInstance().supressErrors();
-	PACKETPP_ASSERT(ipLayer->addOption(IPV4OPT_RouterAlert, sizeof(uint16_t), (uint8_t*)&routerAlerVal) == NULL, "Managed to add an option to packet 7 although max option size exceeded");
+	PACKETPP_ASSERT(ipLayer->addOption(IPv4OptionBuilder(IPV4OPT_RouterAlert, (uint16_t)routerAlerVal)).isNull() == true, "Managed to add an option to packet 7 although max option size exceeded");
 	LoggerPP::getInstance().enableErrors();
 	ipOpt7.computeCalculateFields();
-	PACKETPP_ASSERT(ipLayer->getOptionsCount() == 5, "Packet 7 option count after adding all options isn't 5");
-
+	PACKETPP_ASSERT(ipLayer->getOptionCount() == 5, "Packet 7 option count after adding all options isn't 5");
 
 	PACKETPP_ASSERT(ipLayer->removeOption(IPV4OPT_Timestamp) == true, "Cannot remove timestamp option");
-	PACKETPP_ASSERT(ipLayer->getOptionsCount() == 4, "Packet 7 option count after removing 1st timestamp option isn't 4");
+	PACKETPP_ASSERT(ipLayer->getOptionCount() == 4, "Packet 7 option count after removing 1st timestamp option isn't 4");
 	ipOpt7.computeCalculateFields();
 	PACKETPP_ASSERT(ipLayer->removeOption(IPV4OPT_RouterAlert) == true, "Cannot remove router alert option");
 	ipOpt7.computeCalculateFields();
 	PACKETPP_ASSERT(ipLayer->removeOption(IPV4OPT_Timestamp) == true, "Cannot remove 2nd timestamp option");
-	PACKETPP_ASSERT(ipLayer->getOptionsCount() == 2, "Packet 7 option count after removing 2nd timestamp option isn't 2");
+	PACKETPP_ASSERT(ipLayer->getOptionCount() == 2, "Packet 7 option count after removing 2nd timestamp option isn't 2");
 	ipOpt7.computeCalculateFields();
 	PACKETPP_ASSERT(buffer77Length == ipOpt7.getRawPacket()->getRawDataLen(), "ipOpt7 len (%d) is different than read packet len (%d)", ipOpt7.getRawPacket()->getRawDataLen(), buffer77Length);
 	PACKETPP_ASSERT(memcmp(ipOpt7.getRawPacket()->getRawData(), buffer77, ipOpt7.getRawPacket()->getRawDataLen()) == 0, "ipOpt7: Raw packet data is different than expected");
@@ -845,7 +886,7 @@ PACKETPP_TEST(Ipv4OptionsEditTest)
 	ipOpt7.computeCalculateFields();
 	PACKETPP_ASSERT(ipOpt7.getRawPacketReadOnly()->getRawDataLen() == 42, "Packet 7 length after removing all options isn't 42");
 	ipLayer = ipOpt7.getLayerOfType<IPv4Layer>();
-	PACKETPP_ASSERT(ipLayer->getOptionsCount() == 0, "Packet 7 option count after removing all options isn't 0");
+	PACKETPP_ASSERT(ipLayer->getOptionCount() == 0, "Packet 7 option count after removing all options isn't 0");
 
 	delete [] buffer11;
 	delete [] buffer22;
@@ -1083,7 +1124,6 @@ PACKETPP_TEST(Ipv6ExtensionsTest)
 
 
 	// parsing of Destionation extension
-	IPv6TLVOptionHeader::TLVOption* option = NULL;
 	IPv6Layer* ipv6Layer = ipv6Dest.getLayerOfType<IPv6Layer>();
 	PACKETPP_ASSERT(ipv6Layer->getExtensionCount() == 1, "Dest ext packet1: num of extensions isn't 1");
 	IPv6HopByHopHeader* hopByHopExt = ipv6Layer->getExtensionOfType<IPv6HopByHopHeader>();
@@ -1092,25 +1132,25 @@ PACKETPP_TEST(Ipv6ExtensionsTest)
 	PACKETPP_ASSERT(destExt != NULL, "Dest ext packet: Cannot find dest extension");
 	PACKETPP_ASSERT(destExt->getExtensionType() == IPv6Extension::IPv6Destination, "Dest ext packet: Dest ext type isn't IPv6Extension::IPv6Destination");
 	PACKETPP_ASSERT(destExt->getOptionCount() == 2, "Dest ext packet: Number of options isn't 2");
-	option = destExt->getFirstOption();
-	PACKETPP_ASSERT(option != NULL, "Dest ext packet: First option is null");
-	PACKETPP_ASSERT(option->optionType == 11, "Dest ext packet: First option type isn't 11");
-	PACKETPP_ASSERT(option->getTotalSize() == 3, "Dest ext packet: First option total size isn't 3");
-	PACKETPP_ASSERT(option->getDataSize() == 1, "Dest ext packet: First option data size isn't 1");
-	PACKETPP_ASSERT(option->getValueAs<uint8_t>() == 9, "Dest ext packet: First option data isn't 9");
+	IPv6TLVOptionHeader::IPv6Option option = destExt->getFirstOption();
+	PACKETPP_ASSERT(option.isNull() == false, "Dest ext packet: First option is null");
+	PACKETPP_ASSERT(option.getType() == 11, "Dest ext packet: First option type isn't 11");
+	PACKETPP_ASSERT(option.getTotalSize() == 3, "Dest ext packet: First option total size isn't 3");
+	PACKETPP_ASSERT(option.getDataSize() == 1, "Dest ext packet: First option data size isn't 1");
+	PACKETPP_ASSERT(option.getValueAs<uint8_t>() == 9, "Dest ext packet: First option data isn't 9");
 	option = destExt->getNextOption(option);
-	PACKETPP_ASSERT(option != NULL, "Dest ext packet: Second option is null");
-	PACKETPP_ASSERT(option->optionType == 1, "Dest ext packet: Second option type isn't 1");
-	PACKETPP_ASSERT(option->getTotalSize() == 3, "Dest ext packet: Second option total size isn't 3");
-	PACKETPP_ASSERT(option->getDataSize() == 1, "Dest ext packet: Second option data size isn't 1");
-	PACKETPP_ASSERT(option->getValueAs<uint8_t>() == 0, "Dest ext packet: Second option data isn't 0");
+	PACKETPP_ASSERT(option.isNull() == false, "Dest ext packet: Second option is null");
+	PACKETPP_ASSERT(option.getType() == 1, "Dest ext packet: Second option type isn't 1");
+	PACKETPP_ASSERT(option.getTotalSize() == 3, "Dest ext packet: Second option total size isn't 3");
+	PACKETPP_ASSERT(option.getDataSize() == 1, "Dest ext packet: Second option data size isn't 1");
+	PACKETPP_ASSERT(option.getValueAs<uint8_t>() == 0, "Dest ext packet: Second option data isn't 0");
 	option = destExt->getNextOption(option);
-	PACKETPP_ASSERT(option == NULL, "Dest ext packet: Found third option");
+	PACKETPP_ASSERT(option.isNull() == true, "Dest ext packet: Found third option");
 	option = destExt->getOption(11);
-	PACKETPP_ASSERT(option != NULL, "Dest ext packet: Cannot find option with type 11");
-	PACKETPP_ASSERT(option->getTotalSize() == 3, "Dest ext packet: Option with type 11 total size isn't 3");
-	PACKETPP_ASSERT(destExt->getOption(12) == NULL, "Dest ext packet: Found option with type 12");
-	PACKETPP_ASSERT(destExt->getOption(0) == NULL, "Dest ext packet: Found option with type 0");
+	PACKETPP_ASSERT(option.isNull() == false, "Dest ext packet: Cannot find option with type 11");
+	PACKETPP_ASSERT(option.getTotalSize() == 3, "Dest ext packet: Option with type 11 total size isn't 3");
+	PACKETPP_ASSERT(destExt->getOption(12).isNull() == true, "Dest ext packet: Found option with type 12");
+	PACKETPP_ASSERT(destExt->getOption(0).isNull() == true, "Dest ext packet: Found option with type 0");
 
 
 	// parsing of Hop-By-Hop extension
@@ -1121,21 +1161,21 @@ PACKETPP_TEST(Ipv6ExtensionsTest)
 	PACKETPP_ASSERT(hopByHopExt != NULL, "Hop-By-Hop ext packet: Cannot find Hop-By-Hop extension");
 	PACKETPP_ASSERT(hopByHopExt->getExtensionType() == IPv6Extension::IPv6HopByHop, "Hop-By-Hop ext packet: Hop-By-Hop ext type isn't IPv6Extension::IPv6HopByHop");
 	PACKETPP_ASSERT(hopByHopExt->getOptionCount() == 2, "Hop-By-Hop ext packet: Number of options isn't 2");
-	PACKETPP_ASSERT(hopByHopExt->getOption(3) == NULL, "Hop-By-Hop ext packet: Found option with type 3");
-	PACKETPP_ASSERT(hopByHopExt->getOption(0) == NULL, "Hop-By-Hop ext packet: Found option with type 0");
+	PACKETPP_ASSERT(hopByHopExt->getOption(3).isNull() == true, "Hop-By-Hop ext packet: Found option with type 3");
+	PACKETPP_ASSERT(hopByHopExt->getOption(0).isNull() == true, "Hop-By-Hop ext packet: Found option with type 0");
 	option = hopByHopExt->getFirstOption();
-	PACKETPP_ASSERT(option->optionType == 5, "Hop-By-Hop ext packet: First option type isn't 5");
-	PACKETPP_ASSERT(option->getTotalSize() == 4, "Hop-By-Hop ext packet: First option total size isn't 4");
-	PACKETPP_ASSERT(option->getDataSize() == 2, "Hop-By-Hop ext packet: First option data size isn't 2");
-	PACKETPP_ASSERT(option->getValueAs<uint16_t>() == (uint16_t)0, "Hop-By-Hop ext packet: First option data isn't 0");
+	PACKETPP_ASSERT(option.getType() == 5, "Hop-By-Hop ext packet: First option type isn't 5");
+	PACKETPP_ASSERT(option.getTotalSize() == 4, "Hop-By-Hop ext packet: First option total size isn't 4");
+	PACKETPP_ASSERT(option.getDataSize() == 2, "Hop-By-Hop ext packet: First option data size isn't 2");
+	PACKETPP_ASSERT(option.getValueAs<uint16_t>() == (uint16_t)0, "Hop-By-Hop ext packet: First option data isn't 0");
 	option = hopByHopExt->getNextOption(option);
-	PACKETPP_ASSERT(option != NULL, "Hop-By-Hop ext packet: Second option is null");
-	PACKETPP_ASSERT(option->optionType == 1, "Hop-By-Hop ext packet: Second option type isn't 1");
-	PACKETPP_ASSERT(option->getTotalSize() == 2, "Hop-By-Hop ext packet: Second option total size isn't 2");
-	PACKETPP_ASSERT(option->getDataSize() == 0, "Hop-By-Hop ext packet: Second option data size isn't 0");
-	PACKETPP_ASSERT(option->getValueAs<uint8_t>() == 0, "Hop-By-Hop ext packet: Second option data isn't 0");
+	PACKETPP_ASSERT(option.isNull() == false, "Hop-By-Hop ext packet: Second option is null");
+	PACKETPP_ASSERT(option.getType() == 1, "Hop-By-Hop ext packet: Second option type isn't 1");
+	PACKETPP_ASSERT(option.getTotalSize() == 2, "Hop-By-Hop ext packet: Second option total size isn't 2");
+	PACKETPP_ASSERT(option.getDataSize() == 0, "Hop-By-Hop ext packet: Second option data size isn't 0");
+	PACKETPP_ASSERT(option.getValueAs<uint8_t>() == 0, "Hop-By-Hop ext packet: Second option data isn't 0");
 	option = hopByHopExt->getNextOption(option);
-	PACKETPP_ASSERT(option == NULL, "Hop-By-Hop ext packet: Found third option");
+	PACKETPP_ASSERT(option.isNull() == true, "Hop-By-Hop ext packet: Found third option");
 
 
 	// parsing of routing extension #1
@@ -1184,17 +1224,17 @@ PACKETPP_TEST(Ipv6ExtensionsTest)
 	PACKETPP_ASSERT(ipv6Layer->getExtensionOfType<IPv6AuthenticationHeader>()->getAuthHeader()->securityParametersIndex = ntohl(0x100),
 			"Multiple ext packet: AH ext SPI isn't 0x100");
 	PACKETPP_ASSERT(ipv6Layer->getExtensionOfType<IPv6DestinationHeader>() != NULL, "Multiple ext packet: Cannot find Dest extension");
-	PACKETPP_ASSERT(ipv6Layer->getExtensionOfType<IPv6DestinationHeader>()->getFirstOption()->optionType == 11,
+	PACKETPP_ASSERT(ipv6Layer->getExtensionOfType<IPv6DestinationHeader>()->getFirstOption().getType() == 11,
 			"Multiple ext packet: Dest ext first option type isn't 11");
 	PACKETPP_ASSERT(ipv6Layer->getExtensionOfType<IPv6HopByHopHeader>() != NULL, "Multiple ext packet: Cannot find Hop-By-Hop extension");
-	PACKETPP_ASSERT(ipv6Layer->getExtensionOfType<IPv6HopByHopHeader>()->getFirstOption()->optionType == 5,
+	PACKETPP_ASSERT(ipv6Layer->getExtensionOfType<IPv6HopByHopHeader>()->getFirstOption().getType() == 5,
 			"Multiple ext packet: Hop-By-Hop ext first option type isn't 5");
 	PACKETPP_ASSERT(ipv6Layer->getExtensionOfType<IPv6RoutingHeader>() != NULL, "Multiple ext packet: Cannot find Routing extension");
 	PACKETPP_ASSERT(ipv6Layer->getExtensionOfType<IPv6RoutingHeader>()->getRoutingHeader()->routingType == 0,
 			"Multiple ext packet: Routing ext - routing type isn't 0");
 
 
-	// creation of Destionation extension
+	// creation of Destination extension
 	EthLayer newEthLayer(*ipv6Dest.getLayerOfType<EthLayer>());
 
 	IPv6Layer newIPv6Layer(*ipv6Dest.getLayerOfType<IPv6Layer>());
@@ -1202,9 +1242,9 @@ PACKETPP_TEST(Ipv6ExtensionsTest)
 	newIPv6Layer.removeAllExtensions();
 	PACKETPP_ASSERT(newIPv6Layer.getHeaderLen() == 40, "New IPv6 layer len without extensions isn't 40");
 
-	std::vector<IPv6TLVOptionHeader::TLVOptionBuilder> destExtOptions;
-	destExtOptions.push_back(IPv6TLVOptionHeader::TLVOptionBuilder(11, (uint8_t)9));
-	destExtOptions.push_back(IPv6TLVOptionHeader::TLVOptionBuilder(1, (uint8_t)0));
+	std::vector<IPv6TLVOptionHeader::IPv6TLVOptionBuilder> destExtOptions;
+	destExtOptions.push_back(IPv6TLVOptionHeader::IPv6TLVOptionBuilder(11, (uint8_t)9));
+	destExtOptions.push_back(IPv6TLVOptionHeader::IPv6TLVOptionBuilder(1, (uint8_t)0));
 	IPv6DestinationHeader newDestExtHeader(destExtOptions);
 	newIPv6Layer.addExtension<IPv6DestinationHeader>(newDestExtHeader);
 
@@ -1230,9 +1270,9 @@ PACKETPP_TEST(Ipv6ExtensionsTest)
 	newIPv6Layer2.removeAllExtensions();
 	PACKETPP_ASSERT(newIPv6Layer2.getHeaderLen() == 40, "New IPv6 layer len without extensions isn't 40");
 
-	std::vector<IPv6TLVOptionHeader::TLVOptionBuilder> hopByHopExtOptions;
-	hopByHopExtOptions.push_back(IPv6TLVOptionHeader::TLVOptionBuilder(5, (uint16_t)0));
-	hopByHopExtOptions.push_back(IPv6TLVOptionHeader::TLVOptionBuilder(1, 0, NULL));
+	std::vector<IPv6TLVOptionHeader::IPv6TLVOptionBuilder> hopByHopExtOptions;
+	hopByHopExtOptions.push_back(IPv6TLVOptionHeader::IPv6TLVOptionBuilder(5, (uint16_t)0));
+	hopByHopExtOptions.push_back(IPv6TLVOptionHeader::IPv6TLVOptionBuilder(1, NULL, 0));
 	IPv6HopByHopHeader newHopByHopHeader(hopByHopExtOptions);
 	newIPv6Layer2.addExtension<IPv6HopByHopHeader>(newHopByHopHeader);
 
@@ -1360,9 +1400,9 @@ PACKETPP_TEST(TcpPacketNoOptionsParsing)
 	PACKETPP_ASSERT(tcpLayer->getTcpHeader()->reserved == 0, "Reserved != 0");
 
 	// TCP options
-	PACKETPP_ASSERT(tcpLayer->getTcpOptionsCount() == 0, "TCP options count isn't 0, it's %d", (int)tcpLayer->getTcpOptionsCount());
-	PACKETPP_ASSERT(tcpLayer->getTcpOptionData(PCPP_TCPOPT_NOP) == NULL, "TCP option NOP isn't NULL");
-	PACKETPP_ASSERT(tcpLayer->getTcpOptionData(PCPP_TCPOPT_TIMESTAMP) == NULL, "TCP option Timestamp isn't NULL");
+	PACKETPP_ASSERT(tcpLayer->getTcpOptionCount() == 0, "TCP options count isn't 0, it's %d", (int)tcpLayer->getTcpOptionCount());
+	PACKETPP_ASSERT(tcpLayer->getTcpOption(PCPP_TCPOPT_NOP).isNull(), "TCP option NOP isn't NULL");
+	PACKETPP_ASSERT(tcpLayer->getTcpOption(PCPP_TCPOPT_TIMESTAMP).isNull(), "TCP option Timestamp isn't NULL");
 
 	Layer* afterTcpLayer = tcpLayer->getNextLayer();
 	PACKETPP_ASSERT(afterTcpLayer != NULL, "Layer after TCP is NULL");
@@ -1395,16 +1435,13 @@ PACKETPP_TEST(TcpPacketWithOptionsParsing)
 	PACKETPP_ASSERT(tcpLayer->getTcpHeader()->urgentPointer == 0, "Urgent pointer != 0, it's %d", tcpLayer->getTcpHeader()->urgentPointer);
 
 	// TCP options
-	PACKETPP_ASSERT(tcpLayer->getTcpOptionsCount() == 3, "TCP options count != 3, it's %d", (int)tcpLayer->getTcpOptionsCount());
-	TcpOptionData* nopOptionData = NULL;
-	TcpOptionData* timestampOptionData = NULL;
-	PACKETPP_ASSERT((timestampOptionData = tcpLayer->getTcpOptionData(PCPP_TCPOPT_TIMESTAMP)) != NULL, "TCP option Timestamp is NULL");
-	PACKETPP_ASSERT((nopOptionData = tcpLayer->getTcpOptionData(PCPP_TCPOPT_NOP)) != NULL, "TCP option NOP is NULL");
-	PACKETPP_ASSERT(timestampOptionData->len == 10, "TCP option Timestamp length != 10, it's 0x%X", timestampOptionData->len);
-	uint32_t tsValue = 0;
-	uint32_t tsEchoReply = 0;
-	memcpy(&tsValue, timestampOptionData->value, 4);
-	memcpy(&tsEchoReply, timestampOptionData->value+4, 4);
+	PACKETPP_ASSERT(tcpLayer->getTcpOptionCount() == 3, "TCP options count != 3, it's %d", (int)tcpLayer->getTcpOptionCount());
+	TcpOption timestampOptionData = tcpLayer->getTcpOption(PCPP_TCPOPT_TIMESTAMP);
+	PACKETPP_ASSERT(!timestampOptionData.isNull(), "TCP option Timestamp is NULL");
+	PACKETPP_ASSERT(!tcpLayer->getTcpOption(PCPP_TCPOPT_NOP).isNull(), "TCP option NOP is NULL");
+	PACKETPP_ASSERT(timestampOptionData.getTotalSize() == 10, "TCP option Timestamp length != 10, it's %d", (int)timestampOptionData.getTotalSize());
+	uint32_t tsValue = timestampOptionData.getValueAs<uint32_t>();
+	uint32_t tsEchoReply = timestampOptionData.getValueAs<uint32_t>(4);
 	PACKETPP_ASSERT(tsValue == htonl(195102), "TCP option Timestamp option: timestamp value != 195102, it's %d", (int)ntohl(tsValue));
 	PACKETPP_ASSERT(tsEchoReply == htonl(3555729271UL), "TCP option Timestamp option: echo reply value != 3555729271, it's %d", (int)ntohl(tsEchoReply));
 
@@ -1426,40 +1463,40 @@ PACKETPP_TEST(TcpPacketWithOptionsParsing2)
 	TcpLayer* tcpLayer = NULL;
 	PACKETPP_ASSERT((tcpLayer = tcpPaketWithOptions.getLayerOfType<TcpLayer>()) != NULL, "TCP layer is NULL");
 
-	PACKETPP_ASSERT(tcpLayer->getTcpOptionsCount() == 5, "TCP options count != 5, it's %d", (int)tcpLayer->getTcpOptionsCount());
-	TcpOptionData* mssOptionData = NULL;
-	TcpOptionData* sackParmOptionData = NULL;
-	TcpOptionData* windowScaleOptionData = NULL;
-	PACKETPP_ASSERT((mssOptionData = tcpLayer->getTcpOptionData(TCPOPT_MSS)) != NULL, "TCP option MSS is NULL");
-	PACKETPP_ASSERT((sackParmOptionData = tcpLayer->getTcpOptionData(TCPOPT_SACK_PERM)) != NULL, "TCP option SACK perm is NULL");
-	PACKETPP_ASSERT((windowScaleOptionData = tcpLayer->getTcpOptionData(PCPP_TCPOPT_WINDOW)) != NULL, "TCP option window scale is NULL");
+	PACKETPP_ASSERT(tcpLayer->getTcpOptionCount() == 5, "TCP options count != 5, it's %d", (int)tcpLayer->getTcpOptionCount());
+	TcpOption mssOption = tcpLayer->getTcpOption(TCPOPT_MSS);
+	TcpOption sackParmOption = tcpLayer->getTcpOption(TCPOPT_SACK_PERM);
+	TcpOption windowScaleOption = tcpLayer->getTcpOption(PCPP_TCPOPT_WINDOW);
+	PACKETPP_ASSERT(mssOption.isNotNull(), "TCP option MSS is NULL");
+	PACKETPP_ASSERT(sackParmOption.isNotNull(), "TCP option SACK perm is NULL");
+	PACKETPP_ASSERT(windowScaleOption.isNotNull(), "TCP option window scale is NULL");
 
-	PACKETPP_ASSERT(mssOptionData->getType() == TCPOPT_MSS, "MSS option isn't of type TCPOPT_MSS");
-	PACKETPP_ASSERT(sackParmOptionData->getType() == TCPOPT_SACK_PERM, "Sack perm option isn't of type TCPOPT_SACK_PERM");
-	PACKETPP_ASSERT(windowScaleOptionData->getType() == PCPP_TCPOPT_WINDOW, "Window scale option isn't of type PCPP_TCPOPT_WINDOW");
+	PACKETPP_ASSERT(mssOption.getTcpOptionType() == TCPOPT_MSS, "MSS option isn't of type TCPOPT_MSS");
+	PACKETPP_ASSERT(sackParmOption.getTcpOptionType() == TCPOPT_SACK_PERM, "Sack perm option isn't of type TCPOPT_SACK_PERM");
+	PACKETPP_ASSERT(windowScaleOption.getTcpOptionType() == PCPP_TCPOPT_WINDOW, "Window scale option isn't of type PCPP_TCPOPT_WINDOW");
 
-	PACKETPP_ASSERT(mssOptionData->len == 4, "TCP option Timestamp length != 4, it's 0x%X", mssOptionData->len);
-	PACKETPP_ASSERT(sackParmOptionData->len == 2, "TCP option SACK perm length != 2, it's 0x%X", sackParmOptionData->len);
-	PACKETPP_ASSERT(windowScaleOptionData->len == 3, "TCP option window scale length != 3, it's 0x%X", mssOptionData->len);
+	PACKETPP_ASSERT(mssOption.getTotalSize() == 4, "TCP option Timestamp length != 4, it's %d", (int)mssOption.getTotalSize());
+	PACKETPP_ASSERT(sackParmOption.getTotalSize() == 2, "TCP option SACK perm length != 2, it's %d", (int)sackParmOption.getTotalSize());
+	PACKETPP_ASSERT(windowScaleOption.getTotalSize() == 3, "TCP option window scale length != 3, it's %d", (int)mssOption.getTotalSize());
 
-	PACKETPP_ASSERT(mssOptionData->getValueAs<uint16_t>() == htons(1460), "TCP option MSS option: value != 1460, it's %d", ntohs(mssOptionData->getValueAs<uint16_t>()));
-	PACKETPP_ASSERT(windowScaleOptionData->getValueAs<uint8_t>() == 4, "TCP option window scale option: value != 4, it's %d", windowScaleOptionData->getValueAs<uint8_t>());
-	PACKETPP_ASSERT(sackParmOptionData->getValueAs<uint32_t>() == 0, "TCP option sack perm option: value != 0, it's %d", sackParmOptionData->getValueAs<uint32_t>());
-	PACKETPP_ASSERT(mssOptionData->getValueAs<uint32_t>() == 0, "Wrongly fetched MSS value as uint32_t");
-	PACKETPP_ASSERT(mssOptionData->getValueAs<uint16_t>(1) == 0, "Wrongly fetched MSS value as uint16_t from offset 1");
+	PACKETPP_ASSERT(mssOption.getValueAs<uint16_t>() == htons(1460), "TCP option MSS option: value != 1460, it's %d", ntohs(mssOption.getValueAs<uint16_t>()));
+	PACKETPP_ASSERT(windowScaleOption.getValueAs<uint8_t>() == 4, "TCP option window scale option: value != 4, it's %d", windowScaleOption.getValueAs<uint8_t>());
+	PACKETPP_ASSERT(sackParmOption.getValueAs<uint32_t>() == 0, "TCP option sack perm option: value != 0, it's %d", sackParmOption.getValueAs<uint32_t>());
+	PACKETPP_ASSERT(mssOption.getValueAs<uint32_t>() == 0, "Wrongly fetched MSS value as uint32_t");
+	PACKETPP_ASSERT(mssOption.getValueAs<uint16_t>(1) == 0, "Wrongly fetched MSS value as uint16_t from offset 1");
 
-	TcpOptionData* curOpt = tcpLayer->getFirstTcpOptionData();
-	PACKETPP_ASSERT(curOpt != NULL && curOpt->getType() == TCPOPT_MSS, "First option isn't of type TCPOPT_MSS");
-	curOpt = tcpLayer->getNextTcpOptionData(curOpt);
-	PACKETPP_ASSERT(curOpt != NULL && curOpt->getType() == TCPOPT_SACK_PERM, "Second option isn't of type TCPOPT_SACK_PERM");
-	curOpt = tcpLayer->getNextTcpOptionData(curOpt);
-	PACKETPP_ASSERT(curOpt != NULL && curOpt->getType() == PCPP_TCPOPT_TIMESTAMP, "Third option isn't of type PCPP_TCPOPT_TIMESTAMP");
-	curOpt = tcpLayer->getNextTcpOptionData(curOpt);
-	PACKETPP_ASSERT(curOpt != NULL && curOpt->getType() == PCPP_TCPOPT_NOP, "Fourth option isn't of type PCPP_TCPOPT_NOP");
-	curOpt = tcpLayer->getNextTcpOptionData(curOpt);
-	PACKETPP_ASSERT(curOpt != NULL && curOpt->getType() == PCPP_TCPOPT_WINDOW, "Fifth option isn't of type PCPP_TCPOPT_WINDOW");
-	curOpt = tcpLayer->getNextTcpOptionData(curOpt);
-	PACKETPP_ASSERT(curOpt == NULL, "There is sixth TCP option");
+	TcpOption curOpt = tcpLayer->getFirstTcpOption();
+	PACKETPP_ASSERT(curOpt.isNotNull() && curOpt.getTcpOptionType() == TCPOPT_MSS, "First option isn't of type TCPOPT_MSS");
+	curOpt = tcpLayer->getNextTcpOption(curOpt);
+	PACKETPP_ASSERT(curOpt.isNotNull() && curOpt.getTcpOptionType() == TCPOPT_SACK_PERM, "Second option isn't of type TCPOPT_SACK_PERM");
+	curOpt = tcpLayer->getNextTcpOption(curOpt);
+	PACKETPP_ASSERT(curOpt.isNotNull() && curOpt.getTcpOptionType() == PCPP_TCPOPT_TIMESTAMP, "Third option isn't of type PCPP_TCPOPT_TIMESTAMP");
+	curOpt = tcpLayer->getNextTcpOption(curOpt);
+	PACKETPP_ASSERT(curOpt.isNotNull() && curOpt.getTcpOptionType() == PCPP_TCPOPT_NOP, "Fourth option isn't of type PCPP_TCPOPT_NOP");
+	curOpt = tcpLayer->getNextTcpOption(curOpt);
+	PACKETPP_ASSERT(curOpt.isNotNull() && curOpt.getTcpOptionType() == PCPP_TCPOPT_WINDOW, "Fifth option isn't of type PCPP_TCPOPT_WINDOW");
+	curOpt = tcpLayer->getNextTcpOption(curOpt);
+	PACKETPP_ASSERT(curOpt.isNull(), "There is sixth TCP option");
 
 	PACKETPP_TEST_PASSED;
 }
@@ -1481,17 +1518,13 @@ PACKETPP_TEST(TcpPacketCreation)
 	tcpLayer.getTcpHeader()->ackFlag = 1;
 	tcpLayer.getTcpHeader()->pshFlag = 1;
 	tcpLayer.getTcpHeader()->windowSize = htons(20178);
-	PACKETPP_ASSERT(tcpLayer.addTcpOption(PCPP_TCPOPT_NOP, PCPP_TCPOLEN_NOP, NULL) != NULL, "Couldn't add 1st NOP option");
+	PACKETPP_ASSERT(tcpLayer.addTcpOption(TcpOptionBuilder(TcpOptionBuilder::NOP)).isNotNull(), "Couldn't add 1st NOP option");
 	PACKETPP_ASSERT(tcpLayer.getHeaderLen() == 24, "Header len isn't 24 after 1st NOP addition")
-	PACKETPP_ASSERT(tcpLayer.addTcpOption(PCPP_TCPOPT_NOP, PCPP_TCPOLEN_NOP, NULL) != NULL, "Couldn't add 2nd NOP option");
+	PACKETPP_ASSERT(tcpLayer.addTcpOption(TcpOptionBuilder(TcpOptionBuilder::NOP)).isNotNull(), "Couldn't add 2nd NOP option");
 	PACKETPP_ASSERT(tcpLayer.getHeaderLen() == 24, "Header len isn't 24 after 2nd NOP addition")
-	TcpOptionData* tsOption = tcpLayer.addTcpOption(PCPP_TCPOPT_TIMESTAMP, PCPP_TCPOLEN_TIMESTAMP, NULL);
+	PACKETPP_ASSERT(tcpLayer.addTcpOption(TcpOptionBuilder(PCPP_TCPOPT_TIMESTAMP, NULL, PCPP_TCPOLEN_TIMESTAMP-2)).isNotNull(), "Couldn't add timestamp option");
 	PACKETPP_ASSERT(tcpLayer.getHeaderLen() == 32, "Header len isn't 32 after timestamp addition")
-
-	PACKETPP_ASSERT(tsOption != NULL, "Couldn't add timestamp option");
-	tsOption->setValue<uint32_t>(htonl(3555735960UL));
-
-	PACKETPP_ASSERT(tcpLayer.getTcpOptionsCount() == 3, "TCP option count isn't 3");
+	PACKETPP_ASSERT(tcpLayer.getTcpOptionCount() == 3, "TCP option count isn't 3");
 
 	uint8_t payloadData[9] = { 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82 };
 	PayloadLayer PayloadLayer(payloadData, 9, true);
@@ -1503,11 +1536,13 @@ PACKETPP_TEST(TcpPacketCreation)
 	tcpPacket.addLayer(&PayloadLayer);
 
 	uint32_t tsEchoReply = htonl(196757);
-	TcpOptionData* tsOptionData = tcpLayer.getTcpOptionData(PCPP_TCPOPT_TIMESTAMP);
-	PACKETPP_ASSERT(tsOptionData != NULL, "Couldn't get timestamp option");
-	tsOptionData->setValue<uint32_t>(tsEchoReply, 4);
+	uint32_t tsValue = htonl(3555735960UL);
+	TcpOption tsOption = tcpLayer.getTcpOption(PCPP_TCPOPT_TIMESTAMP);
+	PACKETPP_ASSERT(tsOption.isNotNull(), "Couldn't get timestamp option");
+	tsOption.setValue<uint32_t>(tsValue);
+	tsOption.setValue<uint32_t>(tsEchoReply, 4);
 
-	PACKETPP_ASSERT(tcpLayer.getTcpOptionsCount() == 3, "TCP option count (2nd check) isn't 3");
+	PACKETPP_ASSERT(tcpLayer.getTcpOptionCount() == 3, "TCP option count (2nd check) isn't 3");
 
 	tcpPacket.computeCalculateFields();
 
@@ -1552,31 +1587,26 @@ PACKETPP_TEST(TcpPacketCreation2)
 	tcpLayer.getTcpHeader()->synFlag = 1;
 	tcpLayer.getTcpHeader()->windowSize = htons(14600);
 
-	TcpOptionData* nopOption = tcpLayer.addTcpOption(PCPP_TCPOPT_NOP, PCPP_TCPOLEN_NOP, NULL);
-	PACKETPP_ASSERT(nopOption != NULL, "Couldn't add NOP option");
+	PACKETPP_ASSERT(tcpLayer.addTcpOption(TcpOptionBuilder(TcpOptionBuilder::NOP)).isNotNull(), "Couldn't add NOP option");
 	PACKETPP_ASSERT(tcpLayer.getHeaderLen() == 24, "Header len isn't 24 after NOP addition");
 
-	uint16_t mssValue = htons(1460);
-	TcpOptionData* mssOption = tcpLayer.addTcpOptionAfter(TCPOPT_MSS, PCPP_TCPOLEN_MSS, (uint8_t*)&mssValue, NULL);
-	PACKETPP_ASSERT(mssOption != NULL, "Couldn't add MSS option");
+	PACKETPP_ASSERT(tcpLayer.addTcpOptionAfter(TcpOptionBuilder(TCPOPT_MSS, (uint16_t)1460)).isNotNull(), "Couldn't add MSS option");
 	PACKETPP_ASSERT(tcpLayer.getHeaderLen() == 28, "Header len isn't 28 after MSS addition")
 
-	TcpOptionData* tsOption = tcpLayer.addTcpOptionAfter(PCPP_TCPOPT_TIMESTAMP, PCPP_TCPOLEN_TIMESTAMP, NULL, mssOption);
-	PACKETPP_ASSERT(tsOption != NULL, "Couldn't add timestamp option");
-	tsOption->setValue<uint32_t>(htonl(197364));
-	tsOption->setValue<uint32_t>(0, 4);
+	TcpOption tsOption = tcpLayer.addTcpOptionAfter(TcpOptionBuilder(PCPP_TCPOPT_TIMESTAMP, NULL, PCPP_TCPOLEN_TIMESTAMP-2), TCPOPT_MSS);
+	PACKETPP_ASSERT(tsOption.isNotNull(), "Couldn't add timestamp option");
+	tsOption.setValue<uint32_t>(htonl(197364));
+	tsOption.setValue<uint32_t>(0, 4);
 	PACKETPP_ASSERT(tcpLayer.getHeaderLen() == 36, "Header len isn't 36 after timestamp addition")
 
-	TcpOptionData* winScaleOption = tcpLayer.addTcpOption(PCPP_TCPOPT_WINDOW, PCPP_TCPOLEN_WINDOW, NULL);
-	PACKETPP_ASSERT(winScaleOption != NULL, "Couldn't add Window Scale option");
-	winScaleOption->setValue<uint8_t>(4);
+	TcpOption winScaleOption = tcpLayer.addTcpOption(TcpOptionBuilder(PCPP_TCPOPT_WINDOW, (uint8_t)4));
+	PACKETPP_ASSERT(winScaleOption.isNotNull(), "Couldn't add Window Scale option");
 	PACKETPP_ASSERT(tcpLayer.getHeaderLen() == 40, "Header len isn't 40 after Window scale addition");
 
-	mssOption = tcpLayer.getTcpOptionData(TCPOPT_MSS);
-	PACKETPP_ASSERT(tcpLayer.addTcpOptionAfter(TCPOPT_SACK_PERM, PCPP_TCPOLEN_SACK_PERM, NULL, mssOption) != NULL, "Couldn't add SACK PERM option");
-	PACKETPP_ASSERT(tcpLayer.getHeaderLen() == 40, "Header len isn't 28 after SACK PERM addition")
+	PACKETPP_ASSERT(tcpLayer.addTcpOptionAfter(TcpOptionBuilder(TCPOPT_SACK_PERM, NULL, 0), TCPOPT_MSS).isNotNull(), "Couldn't add SACK PERM option");
+	PACKETPP_ASSERT(tcpLayer.getHeaderLen() == 40, "Header len isn't 40 after SACK PERM addition")
 
-	PACKETPP_ASSERT(tcpLayer.getTcpOptionsCount() == 5, "TCP option count isn't 5");
+	PACKETPP_ASSERT(tcpLayer.getTcpOptionCount() == 5, "TCP option count isn't 5");
 
 	Packet tcpPacket(1);
 	tcpPacket.addLayer(&ethLayer);
@@ -1607,33 +1637,33 @@ PACKETPP_TEST(TcpPacketCreation2)
 	PACKETPP_ASSERT(memcmp(tcpPacket.getRawPacket()->getRawData(), buffer, bufferLength) == 0, "Raw packet data is different than expected");
 
 
-	mssOption = tcpLayer.getTcpOptionData(TCPOPT_MSS);
-	int tcpQsValue = htonl(9999);
-	PACKETPP_ASSERT(tcpLayer.addTcpOptionAfter(TCPOPT_QS, PCPP_TCPOLEN_QS, (uint8_t*)&tcpQsValue, mssOption) != NULL, "Cannot add QS option");
-	int tcpSnackValue = htonl(1000);
-	PACKETPP_ASSERT(tcpLayer.addTcpOption(TCPOPT_SNACK, PCPP_TCPOLEN_SNACK, (uint8_t*)&tcpSnackValue) != NULL, "Cannot add SNACK option");
-	tsOption = tcpLayer.getTcpOptionData(PCPP_TCPOPT_TIMESTAMP);
-	PACKETPP_ASSERT(tcpLayer.addTcpOptionAfter(PCPP_TCPOPT_NOP, PCPP_TCPOLEN_NOP, NULL, tsOption) != NULL, "Cannot add 2nd NOP option");
+	TcpOption qsOption = tcpLayer.addTcpOptionAfter(TcpOptionBuilder(TCPOPT_QS, NULL, PCPP_TCPOLEN_QS), TCPOPT_MSS);
+	PACKETPP_ASSERT(qsOption.isNotNull(), "Cannot add QS option");
+	PACKETPP_ASSERT(qsOption.setValue(htonl(9999)), "Cannot set QS value of 9999");
+	PACKETPP_ASSERT(tcpLayer.addTcpOption(TcpOptionBuilder(TCPOPT_SNACK, (uint32_t)htonl(1000))).isNotNull(), "Cannot add SNACK option");
+	PACKETPP_ASSERT(tcpLayer.addTcpOptionAfter(TcpOptionBuilder(TcpOptionBuilder::NOP), PCPP_TCPOPT_TIMESTAMP).isNotNull(), "Cannot add 2nd NOP option");
 
-	PACKETPP_ASSERT(tcpLayer.getTcpOptionsCount() == 8, "TCP option count isn't 8");
+	PACKETPP_ASSERT(tcpLayer.getTcpOptionCount() == 8, "TCP option count isn't 8");
 
 	PACKETPP_ASSERT(tcpLayer.removeTcpOption(TCPOPT_QS) == true, "Cannot remove QS option");
-	PACKETPP_ASSERT(tcpLayer.getTcpOptionsCount() == 7, "TCP option count isn't 7");
+	PACKETPP_ASSERT(tcpLayer.getTcpOptionCount() == 7, "TCP option count isn't 7");
 	PACKETPP_ASSERT(tcpLayer.removeTcpOption(TCPOPT_SNACK) == true, "Cannot remove SNACK option");
 	PACKETPP_ASSERT(tcpLayer.removeTcpOption(PCPP_TCPOPT_NOP) == true, "Cannot remove NOP option");
-	PACKETPP_ASSERT(tcpLayer.getTcpOptionsCount() == 5, "TCP option count isn't 5 again");
+	PACKETPP_ASSERT(tcpLayer.getTcpOptionCount() == 5, "TCP option count isn't 5 again");
 
 	PACKETPP_ASSERT(memcmp(tcpPacket.getRawPacket()->getRawData(), buffer, bufferLength) == 0, "Raw packet data is different than expected");
 
 	delete [] buffer;
 
 	PACKETPP_ASSERT(tcpLayer.removeAllTcpOptions() == true, "Couldn't remove all TCP options");
-	PACKETPP_ASSERT(tcpLayer.getTcpOptionsCount() == 0, "TCP option count isn't zero after removing all of them");
-	PACKETPP_ASSERT(tcpLayer.getFirstTcpOptionData() == NULL, "Found TCP option after removing all of them");
+	PACKETPP_ASSERT(tcpLayer.getTcpOptionCount() == 0, "TCP option count isn't zero after removing all of them");
+	PACKETPP_ASSERT(tcpLayer.getFirstTcpOption().isNull(), "Found TCP option after removing all of them");
 	PACKETPP_ASSERT(tcpLayer.getHeaderLen() == 20, "Header len isn't 20 after removing all TCP options");
-	PACKETPP_ASSERT(tcpLayer.getTcpOptionData(PCPP_TCPOPT_TIMESTAMP) == NULL, "Found TS option after removing all of TCP options");
+	PACKETPP_ASSERT(tcpLayer.getTcpOption(PCPP_TCPOPT_TIMESTAMP).isNull(), "Found TS option after removing all of TCP options");
 
-	PACKETPP_ASSERT(tcpLayer.addTcpOption(TCPOPT_SNACK, PCPP_TCPOLEN_SNACK, (uint8_t*)&tcpSnackValue) != NULL, "Cannot add SNACK option again");
+	TcpOption tcpSnackOption = tcpLayer.addTcpOption(TcpOptionBuilder(TCPOPT_SNACK, NULL, PCPP_TCPOLEN_SNACK));
+	PACKETPP_ASSERT(tcpSnackOption.isNotNull(), "Cannot add SNACK option again");
+	PACKETPP_ASSERT(tcpSnackOption.setValue(htonl(1000)), "Cannot set SNACK option value");
 
 	PACKETPP_TEST_PASSED;
 }
@@ -3265,7 +3295,7 @@ PACKETPP_TEST(CopyLayerAndPacketTest)
 {
 	int bufferLength = 0;
 	uint8_t* buffer = readFileIntoBuffer("PacketExamples/TwoHttpResponses1.dat", bufferLength);
-	PACKETPP_ASSERT(!(buffer == NULL), "cannot read file");
+	PACKETPP_ASSERT(!(buffer == NULL), "cannot read file TwoHttpResponses1.dat");
 
 	timeval time;
 	gettimeofday(&time, NULL);
@@ -3304,11 +3334,11 @@ PACKETPP_TEST(CopyLayerAndPacketTest)
 			"TcpLayer copy c'tor didn't actually copy the data, data pointer of original and copied layers are equal");
 	PACKETPP_ASSERT(memcmp(sampleTcpPacketWithOptions.getLayerOfType<TcpLayer>()->getData(), tcpLayer.getData(), sampleTcpPacketWithOptions.getLayerOfType<TcpLayer>()->getDataLen()) == 0,
 			"TcpLayer copy c'tor didn't copy data properly, original and copied data isn't equal");
-	PACKETPP_ASSERT(tcpLayer.getTcpOptionsCount() == sampleTcpPacketWithOptions.getLayerOfType<TcpLayer>()->getTcpOptionsCount(),
+	PACKETPP_ASSERT(tcpLayer.getTcpOptionCount() == sampleTcpPacketWithOptions.getLayerOfType<TcpLayer>()->getTcpOptionCount(),
 			"TcpLayer copy and original TCP options count is not equal");
-	PACKETPP_ASSERT(sampleTcpPacketWithOptions.getLayerOfType<TcpLayer>()->getTcpOptionData(PCPP_TCPOPT_TIMESTAMP) != tcpLayer.getTcpOptionData(PCPP_TCPOPT_TIMESTAMP),
+	PACKETPP_ASSERT(sampleTcpPacketWithOptions.getLayerOfType<TcpLayer>()->getTcpOption(PCPP_TCPOPT_TIMESTAMP).getRecordBasePtr() != tcpLayer.getTcpOption(PCPP_TCPOPT_TIMESTAMP).getRecordBasePtr(),
 			"TcpLayer copy and original TCP Timestamp option pointer is the same");
-	PACKETPP_ASSERT(memcmp(sampleTcpPacketWithOptions.getLayerOfType<TcpLayer>()->getTcpOptionData(PCPP_TCPOPT_TIMESTAMP), tcpLayer.getTcpOptionData(PCPP_TCPOPT_TIMESTAMP), PCPP_TCPOLEN_TIMESTAMP) == 0,
+	PACKETPP_ASSERT(sampleTcpPacketWithOptions.getLayerOfType<TcpLayer>()->getTcpOption(PCPP_TCPOPT_TIMESTAMP) == tcpLayer.getTcpOption(PCPP_TCPOPT_TIMESTAMP),
 			"TcpLayer copy and original TCP Timestamp option data differs");
 
 
@@ -3345,47 +3375,117 @@ PACKETPP_TEST(CopyLayerAndPacketTest)
 	PACKETPP_ASSERT(curFieldInCopy == NULL, "HttpResponseLayer copy c'tor: number of fields differs between original and copy");
 
 
-	//Packet copy c'tor test
-	//----------------------
+	//Packet copy c'tor test - Ethernet
+	//---------------------------------
 
 	Packet samplePacketCopy(sampleHttpPacket);
-	PACKETPP_ASSERT(samplePacketCopy.getFirstLayer() != sampleHttpPacket.getFirstLayer(), "Packet copy c'tor didn't actually copy first layer");
-	PACKETPP_ASSERT(samplePacketCopy.getLastLayer() != sampleHttpPacket.getLastLayer(), "Packet copy c'tor didn't actually last layer");
-	PACKETPP_ASSERT(samplePacketCopy.getRawPacket() != sampleHttpPacket.getRawPacket(), "Packet copy c'tor didn't actually copy raw packet");
+	PACKETPP_ASSERT(samplePacketCopy.getFirstLayer() != sampleHttpPacket.getFirstLayer(), "Ethernet: Packet copy c'tor didn't actually copy first layer");
+	PACKETPP_ASSERT(samplePacketCopy.getLastLayer() != sampleHttpPacket.getLastLayer(), "Ethernet: Packet copy c'tor didn't actually last layer");
+	PACKETPP_ASSERT(samplePacketCopy.getRawPacket() != sampleHttpPacket.getRawPacket(), "Ethernet: Packet copy c'tor didn't actually copy raw packet");
 	PACKETPP_ASSERT(samplePacketCopy.getRawPacket()->getRawDataLen() == sampleHttpPacket.getRawPacket()->getRawDataLen(),
-			"Packet copy c'tor: raw packet length differs");
+			"Ethernet: Packet copy c'tor: raw packet length differs");
 	PACKETPP_ASSERT(memcmp(samplePacketCopy.getRawPacket()->getRawData(), sampleHttpPacket.getRawPacket()->getRawData(), sampleHttpPacket.getRawPacket()->getRawDataLen()) == 0,
-			"Packet copy c'tor: raw packet data differs");
-	PACKETPP_ASSERT(samplePacketCopy.isPacketOfType(Ethernet) == true, "Packet copy isn't of type ethernet");
-	PACKETPP_ASSERT(samplePacketCopy.isPacketOfType(IPv4) == true, "Packet copy isn't of type IPv4");
-	PACKETPP_ASSERT(samplePacketCopy.isPacketOfType(TCP) == true, "Packet copy isn't of type TCP");
-	PACKETPP_ASSERT(samplePacketCopy.isPacketOfType(HTTPResponse) == true, "Packet copy isn't of type HTTP response");
+			"Ethernet: Packet copy c'tor: raw packet data differs");
+	PACKETPP_ASSERT(samplePacketCopy.isPacketOfType(Ethernet) == true, "Ethernet: Packet copy isn't of type ethernet");
+	PACKETPP_ASSERT(samplePacketCopy.isPacketOfType(IPv4) == true, "Ethernet: Packet copy isn't of type IPv4");
+	PACKETPP_ASSERT(samplePacketCopy.isPacketOfType(TCP) == true, "Ethernet: Packet copy isn't of type TCP");
+	PACKETPP_ASSERT(samplePacketCopy.isPacketOfType(HTTPResponse) == true, "Ethernet: Packet copy isn't of type HTTP response");
 	Layer* curSamplePacketLayer = sampleHttpPacket.getFirstLayer();
 	Layer* curPacketCopyLayer = samplePacketCopy.getFirstLayer();
 	while (curSamplePacketLayer != NULL && curPacketCopyLayer != NULL)
 	{
-		PACKETPP_ASSERT(curSamplePacketLayer->getProtocol() == curPacketCopyLayer->getProtocol(), "Packet copy c'tor: layer protocol is different");
-		PACKETPP_ASSERT(curSamplePacketLayer->getHeaderLen() == curPacketCopyLayer->getHeaderLen(), "Packet copy c'tor: layer header len is different");
-		PACKETPP_ASSERT(curSamplePacketLayer->getLayerPayloadSize() == curPacketCopyLayer->getLayerPayloadSize(), "Packet copy c'tor: layer payload size is different");
-		PACKETPP_ASSERT(curSamplePacketLayer->getDataLen() == curPacketCopyLayer->getDataLen(), "Packet copy c'tor: data len is different");
-		PACKETPP_ASSERT(memcmp(curSamplePacketLayer->getData(), curPacketCopyLayer->getData(), curSamplePacketLayer->getDataLen()) == 0, "Packet copy c'tor: layer data differs");
+		PACKETPP_ASSERT(curSamplePacketLayer->getProtocol() == curPacketCopyLayer->getProtocol(), "Ethernet: Packet copy c'tor: layer protocol is different");
+		PACKETPP_ASSERT(curSamplePacketLayer->getHeaderLen() == curPacketCopyLayer->getHeaderLen(), "Ethernet: Packet copy c'tor: layer header len is different");
+		PACKETPP_ASSERT(curSamplePacketLayer->getLayerPayloadSize() == curPacketCopyLayer->getLayerPayloadSize(), "Ethernet: Packet copy c'tor: layer payload size is different");
+		PACKETPP_ASSERT(curSamplePacketLayer->getDataLen() == curPacketCopyLayer->getDataLen(), "Ethernet: Packet copy c'tor: data len is different");
+		PACKETPP_ASSERT(memcmp(curSamplePacketLayer->getData(), curPacketCopyLayer->getData(), curSamplePacketLayer->getDataLen()) == 0, "Ethernet: Packet copy c'tor: layer data differs");
 		curSamplePacketLayer = curSamplePacketLayer->getNextLayer();
 		curPacketCopyLayer = curPacketCopyLayer->getNextLayer();
 	}
 
-	PACKETPP_ASSERT(curSamplePacketLayer == NULL, "Packet copy c'tor: number of layers differs between original and copy");
-	PACKETPP_ASSERT(curPacketCopyLayer == NULL, "Packet copy c'tor: number of layers differs between original and copy");
+	PACKETPP_ASSERT(curSamplePacketLayer == NULL, "Ethernet: Packet copy c'tor: number of layers differs between original and copy");
+	PACKETPP_ASSERT(curPacketCopyLayer == NULL, "Ethernet: Packet copy c'tor: number of layers differs between original and copy");
+
+
+	//Packet copy c'tor test - Null/Loopback
+	//--------------------------------------
+
+	int buffer3Length = 0;
+	uint8_t* buffer3 = readFileIntoBuffer("PacketExamples/NullLoopback1.dat", buffer3Length);
+	PACKETPP_ASSERT(!(buffer3 == NULL), "cannot read file NullLoopback1.dat");
+
+	RawPacket nullLoopbackRawPacket((const uint8_t*)buffer3, buffer3Length, time, true, LINKTYPE_NULL);
+	Packet nullLoopbackPacket(&nullLoopbackRawPacket);
+
+	Packet nullLoopbackPacketCopy(nullLoopbackPacket);
+
+	PACKETPP_ASSERT(nullLoopbackPacketCopy.getFirstLayer() != nullLoopbackPacket.getFirstLayer(), "Null/Loopback: Packet copy c'tor didn't actually copy first layer");
+	PACKETPP_ASSERT(nullLoopbackPacketCopy.getLastLayer() != nullLoopbackPacket.getLastLayer(), "Null/Loopback: Packet copy c'tor didn't actually last layer");
+	PACKETPP_ASSERT(nullLoopbackPacketCopy.getRawPacket() != nullLoopbackPacket.getRawPacket(), "Null/Loopback: Packet copy c'tor didn't actually copy raw packet");
+	PACKETPP_ASSERT(nullLoopbackPacketCopy.getRawPacket()->getRawDataLen() == nullLoopbackPacket.getRawPacket()->getRawDataLen(),
+			"Null/Loopback: Packet copy c'tor: raw packet length differs");
+	PACKETPP_ASSERT(memcmp(nullLoopbackPacketCopy.getRawPacket()->getRawData(), nullLoopbackPacket.getRawPacket()->getRawData(), nullLoopbackPacket.getRawPacket()->getRawDataLen()) == 0,
+			"Null/Loopback: Packet copy c'tor: raw packet data differs");
+	PACKETPP_ASSERT(nullLoopbackPacketCopy.getRawPacket()->getLinkLayerType() == LINKTYPE_NULL, "Null/Loopback: Packet copy link type isn't LINKTYPE_NULL");
+	PACKETPP_ASSERT(nullLoopbackPacketCopy.getFirstLayer()->getProtocol() == NULL_LOOPBACK, "Null/Loopback: Packet copy first layer isn't of type NULL_LOOPBACK");
+
+	curSamplePacketLayer = nullLoopbackPacket.getFirstLayer();
+	curPacketCopyLayer = nullLoopbackPacketCopy.getFirstLayer();
+	while (curSamplePacketLayer != NULL && curPacketCopyLayer != NULL)
+	{
+		PACKETPP_ASSERT(curSamplePacketLayer->getProtocol() == curPacketCopyLayer->getProtocol(), "Null/Loopback: Packet copy c'tor: layer protocol is different");
+		PACKETPP_ASSERT(curSamplePacketLayer->getHeaderLen() == curPacketCopyLayer->getHeaderLen(), "Null/Loopback: Packet copy c'tor: layer header len is different");
+		PACKETPP_ASSERT(curSamplePacketLayer->getLayerPayloadSize() == curPacketCopyLayer->getLayerPayloadSize(), "Null/Loopback: Packet copy c'tor: layer payload size is different");
+		PACKETPP_ASSERT(curSamplePacketLayer->getDataLen() == curPacketCopyLayer->getDataLen(), "Null/Loopback: Packet copy c'tor: data len is different");
+		curSamplePacketLayer = curSamplePacketLayer->getNextLayer();
+		curPacketCopyLayer = curPacketCopyLayer->getNextLayer();
+	}
+
+
+	//Packet copy c'tor test - SLL
+	//----------------------------
+
+	int buffer4Length = 0;
+	uint8_t* buffer4 = readFileIntoBuffer("PacketExamples/SllPacket2.dat", buffer4Length);
+	PACKETPP_ASSERT(!(buffer4 == NULL), "cannot read file SllPacket2.dat");
+
+	RawPacket sllRawPacket((const uint8_t*)buffer4, buffer4Length, time, true, LINKTYPE_LINUX_SLL);
+	Packet sllPacket(&sllRawPacket);
+
+	Packet sllPacketCopy(sllPacket);
+
+	PACKETPP_ASSERT(sllPacketCopy.getFirstLayer() != sllPacket.getFirstLayer(), "SLL: Packet copy c'tor didn't actually copy first layer");
+	PACKETPP_ASSERT(sllPacketCopy.getLastLayer() != sllPacket.getLastLayer(), "SLL: Packet copy c'tor didn't actually last layer");
+	PACKETPP_ASSERT(sllPacketCopy.getRawPacket() != sllPacket.getRawPacket(), "SLL: Packet copy c'tor didn't actually copy raw packet");
+	PACKETPP_ASSERT(sllPacketCopy.getRawPacket()->getRawDataLen() == sllPacket.getRawPacket()->getRawDataLen(),
+			"SLL: Packet copy c'tor: raw packet length differs");
+	PACKETPP_ASSERT(memcmp(sllPacketCopy.getRawPacket()->getRawData(), sllPacket.getRawPacket()->getRawData(), sllPacket.getRawPacket()->getRawDataLen()) == 0,
+			"SLL: Packet copy c'tor: raw packet data differs");
+	PACKETPP_ASSERT(sllPacketCopy.getRawPacket()->getLinkLayerType() == LINKTYPE_LINUX_SLL, "SLL: Packet copy link type isn't LINKTYPE_LINUX_SLL");
+	PACKETPP_ASSERT(sllPacketCopy.getFirstLayer()->getProtocol() == SLL, "SLL: Packet copy first layer isn't of type SLL");
+
+	curSamplePacketLayer = sllPacket.getFirstLayer();
+	curPacketCopyLayer = sllPacketCopy.getFirstLayer();
+	while (curSamplePacketLayer != NULL && curPacketCopyLayer != NULL)
+	{
+		PACKETPP_ASSERT(curSamplePacketLayer->getProtocol() == curPacketCopyLayer->getProtocol(), "SLL: Packet copy c'tor: layer protocol is different");
+		PACKETPP_ASSERT(curSamplePacketLayer->getHeaderLen() == curPacketCopyLayer->getHeaderLen(), "SLL: Packet copy c'tor: layer header len is different");
+		PACKETPP_ASSERT(curSamplePacketLayer->getLayerPayloadSize() == curPacketCopyLayer->getLayerPayloadSize(), "SLL: Packet copy c'tor: layer payload size is different");
+		PACKETPP_ASSERT(curSamplePacketLayer->getDataLen() == curPacketCopyLayer->getDataLen(), "SLL: Packet copy c'tor: data len is different");
+		curSamplePacketLayer = curSamplePacketLayer->getNextLayer();
+		curPacketCopyLayer = curPacketCopyLayer->getNextLayer();
+	}
 
 
 	//DnsLayer copy c'tor and operator= test
 	//--------------------------------------
-	int buffer3Length = 0;
-	uint8_t* buffer3 = readFileIntoBuffer("PacketExamples/Dns2.dat", buffer3Length);
-	PACKETPP_ASSERT(!(buffer3 == NULL), "cannot read file Dns2.dat");
+	int buffer5Length = 0;
+	uint8_t* buffer5 = readFileIntoBuffer("PacketExamples/Dns2.dat", buffer5Length);
+	PACKETPP_ASSERT(!(buffer5 == NULL), "cannot read file Dns2.dat");
 
-	RawPacket sampleRawPacket3((const uint8_t*)buffer3, buffer3Length, time, true);
+	RawPacket sampleRawPacket5((const uint8_t*)buffer5, buffer5Length, time, true);
 
-	Packet sampleDnsPacket(&sampleRawPacket3);
+	Packet sampleDnsPacket(&sampleRawPacket5);
 
 	DnsLayer* origDnsLayer = sampleDnsPacket.getLayerOfType<DnsLayer>();
 	PACKETPP_ASSERT(origDnsLayer != NULL, "Couldn't find DNS layer in file");
@@ -4989,12 +5089,12 @@ PACKETPP_TEST(SllPacketCreationTest)
 	tcpLayer.getTcpHeader()->ackNumber = htonl(0x7633e977);
 	tcpLayer.getTcpHeader()->ackFlag = 1;
 	tcpLayer.getTcpHeader()->windowSize = htons(4098);
-	PACKETPP_ASSERT(tcpLayer.addTcpOption(PCPP_TCPOPT_NOP, PCPP_TCPOLEN_NOP, NULL) != NULL, "Cannot add 1st NOP option");
-	PACKETPP_ASSERT(tcpLayer.addTcpOption(PCPP_TCPOPT_NOP, PCPP_TCPOLEN_NOP, NULL) != NULL, "Cannot add 2nd NOP option");
-	TcpOptionData* tsOption = tcpLayer.addTcpOption(PCPP_TCPOPT_TIMESTAMP, PCPP_TCPOLEN_TIMESTAMP, NULL);
-	PACKETPP_ASSERT(tsOption != NULL, "Couldn't set timestamp TCP option");
-	tsOption->setValue<uint32_t>(htonl(0x0402383b));
-	tsOption->setValue<uint32_t>(htonl(0x03ff37f5), 4);
+	PACKETPP_ASSERT(tcpLayer.addTcpOption(TcpOptionBuilder(TcpOptionBuilder::NOP)).isNotNull(), "Cannot add 1st NOP option");
+	PACKETPP_ASSERT(tcpLayer.addTcpOption(TcpOptionBuilder(TcpOptionBuilder::NOP)).isNotNull(), "Cannot add 2nd NOP option");
+	TcpOption tsOption = tcpLayer.addTcpOption(TcpOptionBuilder(PCPP_TCPOPT_TIMESTAMP, NULL, PCPP_TCPOLEN_TIMESTAMP-2));
+	PACKETPP_ASSERT(tsOption.isNotNull(), "Couldn't set timestamp TCP option");
+	tsOption.setValue<uint32_t>(htonl(0x0402383b));
+	tsOption.setValue<uint32_t>(htonl(0x03ff37f5), 4);
 
 	Packet sllPacket(1);
 	sllPacket.addLayer(&sllLayer);
@@ -7025,6 +7125,7 @@ int main(int argc, char* argv[]) {
 	PACKETPP_START_RUNNING_TESTS;
 
 	PACKETPP_RUN_TEST(EthPacketCreation);
+	PACKETPP_RUN_TEST(EthPacketPointerCreation);
 	PACKETPP_RUN_TEST(EthAndArpPacketParsing);
 	PACKETPP_RUN_TEST(ArpPacketCreation);
 	PACKETPP_RUN_TEST(VlanParseAndCreation);

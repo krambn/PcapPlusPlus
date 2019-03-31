@@ -143,10 +143,11 @@ namespace pcpp
 		 * and attaches it to the packet. Notice after calling this method the input layer is attached to the packet so
 		 * every change you make in it affect the packet; Also it cannot be attached to other packets
 		 * @param[in] newLayer A pointer to the new layer to be added to the packet
+		 * @param[in] ownInPacket If true, Packet fully owns newLayer, including memory deletion upon destruct.  Default is false.
 		 * @return True if everything went well or false otherwise (an appropriate error log message will be printed in
 		 * such cases)
 		 */
-		bool addLayer(Layer* newLayer);
+		bool addLayer(Layer* newLayer, bool ownInPacket = false);
 
 		/**
 		 * Insert a new layer after an existing layer in the packet. This method gets a pointer to the new layer as a
@@ -155,10 +156,11 @@ namespace pcpp
 		 * @param[in] prevLayer A pointer to an existing layer in the packet which the new layer should followed by. If
 		 * this layer isn't attached to a packet and error will be printed to log and false will be returned
 		 * @param[in] newLayer A pointer to the new layer to be added to the packet
+		 * @param[in] ownInPacket If true, Packet fully owns newLayer, including memory deletion upon destruct.  Default is false.
 		 * @return True if everything went well or false otherwise (an appropriate error log message will be printed in
 		 * such cases)
 		 */
-		bool insertLayer(Layer* prevLayer, Layer* newLayer);
+		bool insertLayer(Layer* prevLayer, Layer* newLayer, bool ownInPacket = false);
 
 
 		/**
@@ -299,6 +301,8 @@ namespace pcpp
 		bool removeLayer(Layer* layer, bool tryToDelete);
 
 		std::string printPacketInfo(bool timeAsLocalTime);
+
+		Layer* createFirstLayer(LinkLayerType linkType);
 	};
 
 	template<class TLayer>
