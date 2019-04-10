@@ -348,6 +348,13 @@ namespace pcpp
 		 */
 		TcpLayer(uint16_t portSrc, uint16_t portDst);
 
+		/**
+		 * A constructor that allocates a new TCP header with source port destination port, flags and zero TCP options 
+		 * @param[in] portSrc Source port
+		 * @param[in] portDst Destination port
+		 */
+		TcpLayer(uint16_t portSrc, uint16_t portDst, uint8_t flags);
+
 		~TcpLayer() {}
 
 		/**

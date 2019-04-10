@@ -307,6 +307,21 @@ TcpLayer::TcpLayer(uint16_t portSrc, uint16_t portDst)
 	getTcpHeader()->portSrc = htons(portSrc);
 }
 
+TcpLayer::TcpLayer(uint16_t portSrc, uint16_t portDst, uint8_t flags)
+{
+	initLayer();
+	getTcpHeader()->portDst = htons(portDst);
+	getTcpHeader()->portSrc = htons(portSrc);
+  getTcpHeader()->cwrFlag = (flags >> 7) & 0x01;
+  getTcpHeader()->eceFlag = (flags >> 6) & 0x01;
+  getTcpHeader()->urgFlag = (flags >> 5) & 0x01;
+  getTcpHeader()->ackFlag = (flags >> 4) & 0x01;
+  getTcpHeader()->pshFlag = (flags >> 3) & 0x01;
+  getTcpHeader()->rstFlag = (flags >> 2) & 0x01;
+  getTcpHeader()->synFlag = (flags >> 1) & 0x01;
+  getTcpHeader()->finFlag = (flags >> 0) & 0x01;
+}
+
 void TcpLayer::copyLayerData(const TcpLayer& other)
 {
 	m_OptionReader = other.m_OptionReader;
