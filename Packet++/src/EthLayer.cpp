@@ -9,6 +9,7 @@
 #include "PPPoELayer.h"
 #include "MplsLayer.h"
 #include "StreamLayer.h"
+#include "ArpCpuLayer.h"
 #include <string.h>
 #if defined(WIN32) || defined(WINx64) || defined(PCAPPP_MINGW_ENV)
 #include <winsock2.h>
@@ -65,6 +66,9 @@ void EthLayer::parseNextLayer()
 	case PCPP_ETHERTYPE_STREAM:
 		m_NextLayer = new StreamLayer(m_Data + sizeof(ether_header), m_DataLen - sizeof(ether_header), this, m_Packet);
 		break;
+	case PCPP_ETHERTYPE_ARPCPU:
+		m_NextLayer = new ArpCpuLayer(m_Data + sizeof(ether_header), m_DataLen - sizeof(ether_header), this, m_Packet);
+		break;
 	default:
 		m_NextLayer = new PayloadLayer(m_Data + sizeof(ether_header), m_DataLen - sizeof(ether_header), this, m_Packet);
 	}
@@ -92,6 +96,9 @@ void EthLayer::computeCalculateFields()
 			break;
 		case STREAM:
 			getEthHeader()->etherType = htons(PCPP_ETHERTYPE_STREAM);
+			break;
+		case ARPCPU:
+			getEthHeader()->etherType = htons(PCPP_ETHERTYPE_ARPCPU);
 			break;
 		default:
 			return;

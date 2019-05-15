@@ -32,6 +32,7 @@ src/SllLayer.cpp
 src/SSLHandshake.cpp
 src/SSLLayer.cpp
 src/StreamLayer.cpp
+src/ArpCpuLayer.cpp
 src/TcpLayer.cpp
 src/TcpReassembly.cpp
 src/TextBasedProtocol.cpp

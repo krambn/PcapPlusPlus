@@ -62,6 +62,8 @@ namespace pcpp
 #define PCPP_ETHERTYPE_PPP		0x880B
 	/** STREAM */
 #define	PCPP_ETHERTYPE_STREAM	0x9876
+	/** CPUARP */
+#define	PCPP_ETHERTYPE_ARPCPU	0x9900
 
 
 	/**
