@@ -117,6 +117,10 @@ namespace pcpp
 		void init(char* addressAsString);
 	public:
 		/**
+		 * Default constructor
+		 */
+		IPv4Address();
+		/**
 		 * A constructor that creates an instance of the class out of 4-byte integer value
 		 * @todo consider endianess in this method
 		 * @param[in] addressAsInt The address as 4-byte integer
