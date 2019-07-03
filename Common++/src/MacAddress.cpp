@@ -8,6 +8,10 @@ namespace pcpp
 
 MacAddress MacAddress::Zero(0,0,0,0,0,0);
 
+MacAddress::MacAddress() {
+	m_IsValid = false;
+}
+
 MacAddress::MacAddress(uint8_t* addr)
 {
 	memcpy(m_Address, addr, 6);

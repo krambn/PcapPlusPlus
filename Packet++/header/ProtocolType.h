@@ -218,7 +218,11 @@ namespace pcpp
     /**
 		 * RADIUS protocol
 		 */
-		Radius = 0x200000000
+		Radius = 0x200000000,
+		/**
+		 * ARPCPU
+		 */
+		ARPCPU = 0x400000000
 	};
 
 

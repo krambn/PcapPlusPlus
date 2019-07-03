@@ -59,6 +59,11 @@ IPAddress::Ptr_t IPAddress::fromString(std::string addressAsString)
 
 IPv4Address IPv4Address::Zero((uint32_t)0);
 
+IPv4Address::IPv4Address()
+{
+    m_IsValid = false;;
+}
+
 IPv4Address::IPv4Address(const IPv4Address& other)
 {
 	m_pInAddr = new in_addr();

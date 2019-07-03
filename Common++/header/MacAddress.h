@@ -22,6 +22,10 @@ namespace pcpp
 	{
 	public:
 		/**
+		 * Default constructor
+		 */
+		MacAddress();
+		/**
 		 * A constructor that creates an instance of the class out of a byte array. The byte array length must be equal or greater to 6
 		 * (as MAC address is 6-byte long)
 		 * @todo there is no verification array length >= 6. If this is not the case, address will read uninitialized memory
