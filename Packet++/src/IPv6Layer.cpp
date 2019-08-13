@@ -328,4 +328,36 @@ std::string IPv6Layer::toString()
 	return result;
 }
 
+void IPv6Layer::setIpVersion()
+{
+	ip6_hdr* ipHdr = getIPv6Header();
+	ipHdr->ipVersion = (6 & 0x0f);
+}
+
+uint8_t IPv6Layer::getTrafficClass()
+{
+	ip6_hdr* ipHdr = getIPv6Header();
+	return (ipHdr->trafficClassHi << 4) + (ipHdr->trafficClassLo & 0x0f);
+}
+
+void IPv6Layer::setTrafficClass(uint8_t trafficClass)
+{
+	ip6_hdr* ipHdr = getIPv6Header();
+	ipHdr->trafficClassHi = trafficClass >> 4;
+	ipHdr->trafficClassLo = trafficClass & 0x0f;
+}
+
+uint32_t IPv6Layer::getFlowLabel()
+{
+	ip6_hdr* ipHdr = getIPv6Header();
+	return (ipHdr->flowLabelHi << 16) + ntohs(ipHdr->flowLabelLo);
+}
+
+void IPv6Layer::setFlowLabel(uint32_t flowLabel)
+{
+	ip6_hdr* ipHdr = getIPv6Header();
+	ipHdr->flowLabelHi = (flowLabel >> 16) & 0xf;
+	ipHdr->flowLabelLo = htons(flowLabel & 0xffff);
+}
+
 }// namespace pcpp

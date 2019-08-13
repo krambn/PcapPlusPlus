@@ -21,18 +21,28 @@ namespace pcpp
 #pragma pack(push, 1)
 	struct ip6_hdr {
 		#if (BYTE_ORDER == LITTLE_ENDIAN)
-		/** Traffic class */
-		uint8_t trafficClass:4,
+		/** Traffic class high bits*/
+		uint8_t trafficClassHi:4,
 		/** IP version number, has the value of 6 for IPv6 */
 				ipVersion:4;
+		/** Flow label high bits*/
+		uint8_t flowLabelHi:4,
+		/** Traffic class low bits*/
+				trafficClassLo:4;
+		/** Flow label low bits*/
+		uint16_t flowLabelLo;
 		#else
 		/** IP version number, has the value of 6 for IPv6 */
 		uint8_t ipVersion:4,
-		/** Traffic class */
-				trafficClass:4;
+		/** Traffic class high bits*/
+				trafficClassHi:4;
+		/** Traffic class low bits*/
+		uint8_t trafficClassLo:4,
+		/** Flow label high bits*/
+				flowLabelHi:4;
+		/** Flow label low bits*/
+		uint16_t flowLabelLo;
 		#endif
-		/** Flow label */
-		uint8_t flowLabel[3];
 		/** The size of the payload in octets, including any extension headers */
 		uint16_t payloadLength;
 		/** Specifies the type of the next header (protocol). Must be one of ::IPProtocolTypes */
@@ -167,6 +177,40 @@ namespace pcpp
 		std::string toString();
 
 		OsiModelLayer getOsiModelLayer() { return OsiModelNetworkLayer; }
+
+		/**
+		 * Get the IP version number
+		 * @return the IP version number of the packet
+		 */
+		inline uint8_t getIpVersion() { return getIPv6Header()->ipVersion; }
+
+		/**
+		 * Set the IP version number.
+		 * Note that IP version number has the value of 6 for IPv6.
+		 */
+		void setIpVersion();
+
+		/**
+		 * Get the traffic class
+		 * @return the traffic class in the IPv6 header
+		 */
+		uint8_t getTrafficClass();
+
+		/**
+		 * Set the traffic class in the IPv6 header
+		 */
+		void setTrafficClass(uint8_t);
+
+		/**
+		 * Get the flow label
+		 * @return the flow label in the IPv6 header
+		 */
+		uint32_t getFlowLabel();
+
+		/**
+		 * Set the flow label in the IPv6 header
+		 */
+		void setFlowLabel(uint32_t);
 
 	private:
 		void initLayer();
